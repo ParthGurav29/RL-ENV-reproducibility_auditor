@@ -1,0 +1,7 @@
+experiment:
+  name: "hard_reproducibility_test"
+  epochs: 10
+  batch_size: 64
+  # The seed is set here, but the code overrides it via CLI
+  seed: 42
+  learning_rate: 0.001

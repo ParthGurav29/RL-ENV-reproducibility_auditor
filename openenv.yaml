@@ -1,0 +1,135 @@
+version: "1.0.0"
+env_id: "reproducibility-auditor-v1"
+description: >
+  An RL environment where agents act as ML reproducibility auditors.
+  30 violation types across seeds, determinism flags, cross-file gaps,
+  and advanced issues. Dynamic violation injection per episode prevents
+  memorisation. Rewards in [0.0, 1.0] with partial credit and
+  false-positive penalty.
+author: "Team Prime"
+
+# ── Task Definitions ─────────────────────────────────────────────────────────
+tasks:
+  - id: "easy"
+    name: "Seed, Dependency & Determinism Audit"
+    description: >
+      12-violation pool: missing seeds, unpinned packages, PYTHONHASHSEED,
+      cuDNN flags, thread count. 5–9 active violations per episode.
+    difficulty: "easy"
+    violation_pool_size: 12
+    active_violations_range: [5, 9]
+
+  - id: "medium"
+    name: "PyTorch Determinism & DataLoader Audit"
+    description: >
+      8-violation pool: deterministic flags, DataLoader seeding, Generator,
+      default_rng, Dropout. 4–6 active violations per episode.
+    difficulty: "medium"
+    violation_pool_size: 8
+    active_violations_range: [4, 6]
+
+  - id: "hard"
+    name: "Advanced Cross-File Audit"
+    description: >
+      10-violation pool: cross-file seeds, version conflicts, multiprocessing,
+      late PYTHONHASHSEED, CUBLAS ordering, incomplete CUDA seeds.
+      5–8 active violations per episode.
+    difficulty: "hard"
+    violation_pool_size: 10
+    active_violations_range: [5, 8]
+
+# ── Interface Specification ──────────────────────────────────────────────────
+observation_type: "text"
+action_type: "json"
+reward_range: [0.0, 1.0]
+episode_steps: 1
+
+# Action schema (Pydantic-compatible)
+action_schema:
+  type: "object"
+  required: ["violations", "reproducibility_score", "explanation"]
+  properties:
+    violations:
+      type: "array"
+      items:
+        type: "object"
+        required: ["violation_type", "file_name", "line_number", "suggested_fix_code"]
+        properties:
+          violation_type:
+            type: "string"
+            description: "Short keyword/category of the violation"
+          file_name:
+            type: "string"
+            description: "File where the violation occurs"
+          line_number:
+            type: "integer"
+            description: "Line number of the violation"
+          suggested_fix_code:
+            type: "string"
+            description: "Exact code snippet to fix the violation"
+    reproducibility_score:
+      type: "number"
+      minimum: 0.0
+      maximum: 1.0
+      description: "Agent self-assessed reproducibility score"
+    explanation:
+      type: "string"
+      description: "Human-readable audit summary"
+
+# ── Randomization ────────────────────────────────────────────────────────────
+randomization: >
+  Violation-level: a random subset of bugs is injected each episode via
+  select_violations(). Presentation-level: file order, decoy comments,
+  and whitespace are shuffled per episode_seed to prevent memorisation.
+
+# ── REST Endpoints (OpenEnv spec) ────────────────────────────────────────────
+endpoints:
+  health:
+    method: GET
+    path: /health
+    description: "Returns HTTP 200 with {status: ok, tasks_loaded: [...]}. Used by the automated ping check."
+  spec:
+    method: GET
+    path: /spec
+    description: "Returns static environment metadata (this file as JSON)."
+  reset:
+    method: POST
+    path: /reset
+    body:
+      task: "string — one of: easy | medium | hard"
+    description: "Resets the environment. Returns observation text + info.active_violations list."
+  step:
+    method: POST
+    path: /step
+    body:
+      task: "string"
+      action: "AuditAction JSON object"
+    description: "Submits an agent action. Returns reward (0–1), terminated=true, info.score_breakdown."
+  state:
+    method: GET
+    path: /state
+    query_params:
+      task: "string"
+    description: "Returns full serialisable EnvState (step_count, active_violations, last_reward, etc.)."
+  leaderboard:
+    method: GET
+    path: /leaderboard
+    description: "Returns scoring history with per-task best/avg statistics."
+
+# ── Baseline Script ──────────────────────────────────────────────────────────
+baseline_script: "inference.py"
+baseline_description: >
+  OpenAI-client-based baseline. Calls reset() → LLM → step() for each of
+  the three tasks and reports per-task rewards and final average.
+  Required env vars: API_BASE_URL, MODEL_NAME, HF_TOKEN.
+
+# ── HF Spaces Metadata ───────────────────────────────────────────────────────
+tags:
+  - openenv
+  - ml-reproducibility
+  - audit
+  - benchmarking
+  - reinforcement-learning
+
+sdk: "docker"
+app_port: 7860

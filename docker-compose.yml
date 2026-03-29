@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  reproducibility-auditor:
+    build: .
+    ports:
+      - "7860:7860"
+    environment:
+      - PYTHONUNBUFFERED=1
+      # ── Required by OpenEnv hackathon spec ──────────────────────────────────
+      # Override these when running locally or in CI:
+      #   docker-compose run -e HF_TOKEN=hf_... reproducibility-auditor
+      - API_BASE_URL=${API_BASE_URL:-https://api-inference.huggingface.co/v1/}
+      - MODEL_NAME=${MODEL_NAME:-Qwen/Qwen2.5-72B-Instruct}
+      - HF_TOKEN=${HF_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

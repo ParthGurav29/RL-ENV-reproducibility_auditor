@@ -4,8 +4,8 @@ description: >
   An RL environment where agents act as ML reproducibility auditors.
   30 violation types across seeds, determinism flags, cross-file gaps,
   and advanced issues. Dynamic violation injection per episode prevents
-  memorisation. Rewards in [0.0, 1.0] with partial credit and
-  false-positive penalty.
+  memorisation. Two-step episodes with intermediate triage feedback.
+  Rewards in [0.0, 1.0] with partial credit and false-positive penalty.
 author: "Team Prime"
 
 # ── Task Definitions ─────────────────────────────────────────────────────────
@@ -13,10 +13,10 @@ tasks:
   - id: "easy"
     name: "Seed, Dependency & Determinism Audit"
     description: >
-      12-violation pool: missing seeds, unpinned packages, PYTHONHASHSEED,
-      cuDNN flags, thread count. 5–9 active violations per episode.
+      11-violation pool: missing seeds, unpinned packages, PYTHONHASHSEED,
+      cuDNN flags. 5–9 active violations per episode.
     difficulty: "easy"
-    violation_pool_size: 12
+    violation_pool_size: 11
     active_violations_range: [5, 9]
 
   - id: "medium"
@@ -31,20 +31,68 @@ tasks:
   - id: "hard"
     name: "Advanced Cross-File Audit"
     description: >
-      10-violation pool: cross-file seeds, version conflicts, multiprocessing,
-      late PYTHONHASHSEED, CUBLAS ordering, incomplete CUDA seeds.
-      5–8 active violations per episode.
+      9-violation pool: cross-file seeds, version conflicts, multiprocessing,
+      CUBLAS ordering, incomplete CUDA seeds.
+      5–7 active violations per episode.
     difficulty: "hard"
-    violation_pool_size: 10
-    active_violations_range: [5, 8]
+    violation_pool_size: 9
+    active_violations_range: [5, 7]
 
 # ── Interface Specification ──────────────────────────────────────────────────
 observation_type: "text"
 action_type: "json"
 reward_range: [0.0, 1.0]
-episode_steps: 1
+episode_steps: 2
 
-# Action schema (Pydantic-compatible)
+# ── Multi-Step Episode Flow ──────────────────────────────────────────────────
+step_descriptions:
+  step_1:
+    name: "Triage"
+    description: >
+      Agent identifies suspicious files and violation categories from the code.
+      Returns intermediate reward (F1 score on file/category identification)
+      and actionable feedback (which claims were confirmed/rejected).
+      terminated=False — episode continues to step 2.
+    action_type: "TriageAction"
+  step_2:
+    name: "Audit"
+    description: >
+      Agent submits full violation report with specific violation types,
+      file names, line numbers, and fix code. Enhanced observation includes
+      triage feedback from step 1.
+      terminated=True — episode ends, final grading applied.
+    action_type: "AuditAction"
+
+# Triage action schema (Step 1)
+triage_action_schema:
+  type: "object"
+  required: ["suspicious_files", "suspected_categories", "reasoning"]
+  properties:
+    suspicious_files:
+      type: "array"
+      items:
+        type: "string"
+      description: "File names the agent suspects contain violations"
+    suspected_categories:
+      type: "array"
+      items:
+        type: "string"
+        enum:
+          - "random_seeds"
+          - "dependency_pinning"
+          - "determinism_flags"
+          - "environment_config"
+          - "dataloader_reproducibility"
+          - "model_initialization"
+          - "configuration_management"
+          - "multiprocessing"
+          - "rng_initialization"
+      description: "Violation categories the agent suspects are present"
+    reasoning:
+      type: "string"
+      description: "Brief explanation of suspicions"
+
+# Audit action schema (Step 2)
 action_schema:
   type: "object"
   required: ["violations", "reproducibility_score", "explanation"]
@@ -103,14 +151,16 @@ endpoints:
     path: /step
     body:
       task: "string"
-      action: "AuditAction JSON object"
-    description: "Submits an agent action. Returns reward (0–1), terminated=true, info.score_breakdown."
+      action: "TriageAction (step 1) or AuditAction (step 2) JSON object"
+    description: >
+      Step 1: submits triage action → returns triage_reward, terminated=false, triage_feedback.
+      Step 2: submits audit action → returns final reward, terminated=true, score_breakdown.
   state:
     method: GET
     path: /state
     query_params:
       task: "string"
-    description: "Returns full serialisable EnvState (step_count, active_violations, last_reward, etc.)."
+    description: "Returns full serialisable EnvState (step_count, active_violations, triage_completed, etc.)."
   leaderboard:
     method: GET
     path: /leaderboard
@@ -119,8 +169,8 @@ endpoints:
 # ── Baseline Script ──────────────────────────────────────────────────────────
 baseline_script: "inference.py"
 baseline_description: >
-  OpenAI-client-based baseline. Calls reset() → LLM → step() for each of
-  the three tasks and reports per-task rewards and final average.
+  OpenAI-client-based baseline. For each task: reset() → LLM triage → step(triage)
+  → LLM audit (with feedback) → step(audit). Reports per-task triage + audit rewards.
   Required env vars: API_BASE_URL, MODEL_NAME, HF_TOKEN.
 
 # ── HF Spaces Metadata ───────────────────────────────────────────────────────

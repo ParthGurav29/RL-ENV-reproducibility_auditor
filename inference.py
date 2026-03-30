@@ -4,6 +4,10 @@ inference.py — Official OpenEnv Baseline Script
 Calls the live HTTP server (not local imports) to fully exercise the
 OpenEnv REST contract, mirroring exactly what the eval harness does.
 
+Multi-step episodes (2-step):
+  Step 1 — Triage: Identify suspicious files and violation categories
+  Step 2 — Audit:  Full violation report using triage feedback
+
 Required environment variables (all defined per OpenEnv hackathon spec):
   API_BASE_URL  — LLM API endpoint (OpenAI-compatible), e.g. https://api-inference.huggingface.co/v1/
   MODEL_NAME    — Model identifier, e.g. Qwen/Qwen2.5-72B-Instruct
@@ -23,9 +27,10 @@ import json
 import argparse
 import requests
 from openai import OpenAI
+from dotenv import load_dotenv
 
-
-
+# Load .env file so API_BASE_URL, MODEL_NAME, HF_TOKEN are available
+load_dotenv()
 
 # ── Required environment variables (OpenEnv hackathon spec) ──────────────────
 API_BASE_URL   = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -47,10 +52,41 @@ DEFAULT_SERVER  = "http://localhost:7860"
 REQUEST_TIMEOUT = 30   # seconds per HTTP call
 LLM_TIMEOUT     = 60   # seconds per LLM call
 
-# ── System prompt covering all 30 violation types ────────────────────────────
-SYSTEM_PROMPT = """You are an expert ML reproducibility auditor.
+# ── System prompts ───────────────────────────────────────────────────────────
 
-Given one or more ML experiment files, identify ALL reproducibility violations present in the code and propose fixes.
+TRIAGE_PROMPT = """You are an expert ML reproducibility auditor performing an initial triage.
+
+Given ML experiment files, identify which FILES are most likely to contain reproducibility violations,
+and which CATEGORIES of violations you suspect are present.
+
+Available violation categories:
+- random_seeds: Missing random, numpy, torch, CUDA seed calls
+- dependency_pinning: Unpinned package versions, version conflicts
+- determinism_flags: Missing cudnn.deterministic, cudnn.benchmark, use_deterministic_algorithms
+- environment_config: Missing PYTHONHASHSEED, CUBLAS_WORKSPACE_CONFIG, set_num_threads
+- dataloader_reproducibility: DataLoader shuffle without seed, missing worker_init_fn, generator seed
+- model_initialization: Weight init without seed guard, Dropout without seed
+- configuration_management: CLI args overriding config seeds without re-seeding
+- multiprocessing: Workers spawned without seed propagation
+- rng_initialization: np.random.default_rng() without seed
+
+Respond ONLY with valid JSON. Do NOT use markdown code blocks.
+Your response must exactly match this structure:
+{
+  "suspicious_files": ["train.py", "requirements.txt"],
+  "suspected_categories": ["random_seeds", "dependency_pinning"],
+  "reasoning": "Brief explanation of why these files and categories are suspicious"
+}
+
+CRITICAL: Only flag files and categories that genuinely appear suspicious from the code. Do NOT list everything — precision matters as much as recall.
+"""
+
+AUDIT_PROMPT = """You are an expert ML reproducibility auditor.
+
+Given ML experiment files AND feedback from your preliminary triage, identify ALL reproducibility violations present in the code and propose fixes.
+
+Use the triage feedback to focus your analysis — confirmed files and categories are more likely to contain violations.
+
 Respond ONLY with valid JSON. Do NOT use markdown code blocks.
 Your response must exactly match this structure:
 {
@@ -66,35 +102,49 @@ Your response must exactly match this structure:
   "explanation": "<overall audit summary>"
 }
 
-CRITICAL: Only report violations ACTUALLY PRESENT in the provided code. Do NOT invent issues.
+IMPORTANT RULES:
+1. Report EVERY violation as a SEPARATE entry — do NOT merge related issues.
+2. Be thorough. Check EVERY item in the checklist below against the code.
+3. ONLY report violations that ACTUALLY EXIST in the code. Each false positive costs as much as a missed detection.
+4. Use the EXACT violation_type descriptions shown below when reporting.
+5. Verify each violation by looking at the actual code — don't guess.
 
-Violations to look for:
-SEEDS & ENVIRONMENT:
-- Missing random.seed(), np.random.seed(), torch.manual_seed(), torch.cuda.manual_seed_all()
-- PYTHONHASHSEED environment variable not set
-- torch.set_num_threads(1) not called
-- Unpinned package versions in requirements.txt
+CHECK EACH OF THESE SYSTEMATICALLY:
+
+SEEDS (check train.py for each one individually):
+- "random.seed missing" → random.seed() not called → fix: random.seed(42)
+- "np.random.seed missing" → np.random.seed() not called → fix: np.random.seed(42)
+- "torch.manual_seed missing" → torch.manual_seed() not called → fix: torch.manual_seed(42)
+- "cuda.manual_seed missing" → torch.cuda.manual_seed_all() not called → fix: torch.cuda.manual_seed_all(42)
+
+ENVIRONMENT & DETERMINISM (check train.py):
+- "PYTHONHASHSEED not set" → os.environ["PYTHONHASHSEED"] missing → fix: os.environ["PYTHONHASHSEED"] = "0"
+- "cudnn.deterministic not set" → torch.backends.cudnn.deterministic not True → fix: torch.backends.cudnn.deterministic = True
+- "cudnn.benchmark not disabled" → torch.backends.cudnn.benchmark not False → fix: torch.backends.cudnn.benchmark = False
+
+DEPENDENCIES (check requirements.txt):
+- "unpinned torch version" → torch without ==version → fix: torch==2.0.0
+- "unpinned numpy version" → numpy without ==version → fix: numpy==1.24.0
+- "unpinned scikit-learn version" → scikit-learn without ==version → fix: scikit-learn==1.2.2
+- "unpinned pandas version" → pandas without ==version → fix: pandas==2.0.0
 
 PYTORCH DETERMINISM:
-- torch.use_deterministic_algorithms(True) not set
-- torch.backends.cudnn.deterministic not True
-- torch.backends.cudnn.benchmark not False
-- DataLoader shuffle=True without worker_init_fn or generator seed
-- DataLoader missing worker_init_fn for multi-worker reproducibility
-- torch.Generator() created without .manual_seed()
-- np.random.default_rng() used without a seed argument
-- nn.Dropout used without seed guard
+- "use_deterministic_algorithms missing" → torch.use_deterministic_algorithms(True) not called → fix: torch.use_deterministic_algorithms(True)
+- "DataLoader shuffle without seed" → shuffle=True but no generator seed → fix: generator=torch.Generator().manual_seed(42)
+- "worker_init_fn missing" → DataLoader without worker_init_fn → fix: worker_init_fn=seed_worker
+- "Generator seed missing" → torch.Generator() without .manual_seed() → fix: g.manual_seed(42)
+- "default_rng seed missing" → np.random.default_rng() without seed → fix: np.random.default_rng(42)
+- "Dropout without seed guard" → nn.Dropout without seed → fix: torch.manual_seed(42) before dropout
 
 CROSS-FILE & ADVANCED:
-- CUBLAS_WORKSPACE_CONFIG environment variable not set
-- Worker seeds not propagated across files (e.g., dataset.py)
-- Incompatible package version combinations (torch vs torchvision)
-- Weight initialisation without seed guard (nn.init without prior seed)
-- CLI args overriding config seeds without re-seeding all libraries
-- multiprocessing workers spawned without seed propagation
-- PYTHONHASHSEED set too late (after Python startup, inside main())
-- torch.use_deterministic_algorithms called without CUBLAS_WORKSPACE_CONFIG set first
-- torch.cuda.manual_seed() used instead of manual_seed_all() (misses multi-GPU)
+- "CUBLAS_WORKSPACE_CONFIG not set" → missing env var → fix: os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+- "worker_init_fn cross-file missing" → dataset.py worker seed not propagated → fix: worker_init_fn in dataset.py
+- "torchvision version conflict" → incompatible torch/torchvision → fix: torchvision==0.16.2
+- "weight init without seed guard" → nn.init without torch.manual_seed() → fix: torch.manual_seed(42) before init
+- "config yaml seed override" → CLI args override config seed without re-seeding → fix: re-seed all libraries
+- "multiprocessing pool without seed" → workers spawned without seed → fix: initializer with seed
+- "deterministic_algorithms without CUBLAS" → use_deterministic_algorithms without CUBLAS_WORKSPACE_CONFIG → fix: set CUBLAS_WORKSPACE_CONFIG first
+- "manual_seed instead of manual_seed_all" → cuda.manual_seed() misses multi-GPU → fix: torch.cuda.manual_seed_all(42)
 """
 
 
@@ -120,60 +170,97 @@ def _call_server(server: str, method: str, path: str, payload: dict | None = Non
         raise
 
 
-def evaluate_task(task_name: str, client: OpenAI, server: str) -> float:
-    """Run one task episode via the HTTP server and return the reward."""
+def _parse_llm_json(raw: str) -> dict:
+    """Strip markdown fences and parse JSON from LLM response."""
+    text = raw.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return json.loads(text.strip())
+
+
+def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, float]:
+    """Run one 2-step task episode via the HTTP server. Returns (triage_reward, audit_reward)."""
     print(f"\n🔍 Evaluating Task: {task_name.upper()}")
 
-    # 1. Reset via server
+    # ── Step 0: Reset ─────────────────────────────────────────────────────────
     reset_data = _call_server(server, "POST", "/reset", {"task": task_name})
     observation = reset_data.get("observation", "")
     active = reset_data.get("info", {}).get("active_violations", [])
+    max_steps = reset_data.get("info", {}).get("max_steps", 2)
     print(f"   Active violations this episode: {len(active)}")
+    print(f"   Episode steps: {max_steps}")
 
-    # 2. Call LLM via OpenAI client (required by OpenEnv hackathon spec)
+    # ── Step 1: Triage ────────────────────────────────────────────────────────
+    print(f"\n   📋 Step 1/2: Triage ...")
     try:
-        response = client.chat.completions.create(
+        triage_response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": TRIAGE_PROMPT},
                 {"role": "user",   "content": observation},
             ],
             temperature=0.1,
             timeout=LLM_TIMEOUT,
         )
-        action_str = response.choices[0].message.content.strip()
-
-        # Strip accidental markdown fences
-        if action_str.startswith("```json"):
-            action_str = action_str[7:]
-        if action_str.startswith("```"):
-            action_str = action_str[3:]
-        if action_str.endswith("```"):
-            action_str = action_str[:-3]
-        action_str = action_str.strip()
-
-        # Validate JSON before sending
-        action_dict = json.loads(action_str)
-
+        triage_str = triage_response.choices[0].message.content.strip()
+        triage_dict = _parse_llm_json(triage_str)
     except json.JSONDecodeError as e:
-        print(f"   ⚠️  LLM returned invalid JSON: {e}")
-        action_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": "Parse error"}
+        print(f"   ⚠️  LLM returned invalid triage JSON: {e}")
+        triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": "Parse error"}
     except Exception as e:
-        print(f"   ⚠️  LLM call failed: {e}")
-        return 0.0
+        print(f"   ⚠️  LLM triage call failed: {e}")
+        triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": str(e)}
 
-    # 3. Step via server
-    step_data = _call_server(server, "POST", "/step", {"task": task_name, "action": action_dict})
+    # Submit triage to server
+    triage_result = _call_server(server, "POST", "/step", {"task": task_name, "action": triage_dict})
+    triage_reward = triage_result.get("reward", 0.0)
+    triage_feedback = triage_result.get("info", {}).get("triage_feedback", {})
+    enhanced_obs = triage_result.get("observation", observation)
 
-    reward = step_data.get("reward", 0.0)
+    print(f"   📊 Triage reward: {triage_reward:.4f}")
+    if triage_feedback.get("files_confirmed"):
+        print(f"   ✅ Confirmed files: {', '.join(triage_feedback['files_confirmed'])}")
+    if triage_feedback.get("categories_confirmed"):
+        print(f"   ✅ Confirmed categories: {', '.join(triage_feedback['categories_confirmed'])}")
+
+    # ── Step 2: Full Audit ────────────────────────────────────────────────────
+    print(f"\n   🔬 Step 2/2: Full Audit ...")
+    try:
+        audit_response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": AUDIT_PROMPT},
+                {"role": "user",   "content": enhanced_obs},
+            ],
+            temperature=0.1,
+            timeout=LLM_TIMEOUT,
+        )
+        audit_str = audit_response.choices[0].message.content.strip()
+        audit_dict = _parse_llm_json(audit_str)
+    except json.JSONDecodeError as e:
+        print(f"   ⚠️  LLM returned invalid audit JSON: {e}")
+        audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": "Parse error"}
+    except Exception as e:
+        print(f"   ⚠️  LLM audit call failed: {e}")
+        return triage_reward, 0.0
+
+    # Submit audit to server
+    step_data = _call_server(server, "POST", "/step", {"task": task_name, "action": audit_dict})
+
+    audit_reward = step_data.get("reward", 0.0)
     breakdown = step_data.get("info", {}).get("score_breakdown", {})
 
     for check, passed in breakdown.items():
         icon = "✅" if passed else "❌"
         print(f"    {icon}  {check}")
-    print(f"    ── Reward: {reward:.4f}")
+    print(f"    ── Triage reward:  {triage_reward:.4f}")
+    print(f"    ── Audit reward:   {audit_reward:.4f}")
 
-    return reward
+    return triage_reward, audit_reward
 
 
 def main():
@@ -210,6 +297,7 @@ def main():
     print(f"  MODEL_NAME   : {MODEL_NAME}")
     print(f"  HF_TOKEN     : {'✅ set' if HF_TOKEN else '❌ not set'}")
     print(f"  Server       : {args.server}")
+    print(f"  Episode mode : 2-step (triage → audit)")
     print(f"{'='*56}\n")
 
     # ── Verify server is reachable (automated ping gate) ─────────────────────
@@ -228,22 +316,28 @@ def main():
 
     # ── Run all three tasks ───────────────────────────────────────────────────
     tasks = ["easy", "medium", "hard"]
-    scores: dict[str, float] = {}
+    triage_scores: dict[str, float] = {}
+    audit_scores: dict[str, float] = {}
 
     print("🚀 Starting inference run ...\n")
     for task in tasks:
-        scores[task] = evaluate_task(task, client, args.server)
+        t_score, a_score = evaluate_task(task, client, args.server)
+        triage_scores[task] = t_score
+        audit_scores[task] = a_score
 
     # ── Summary ───────────────────────────────────────────────────────────────
-    final_avg = sum(scores.values()) / len(scores)
+    avg_triage = sum(triage_scores.values()) / len(triage_scores)
+    avg_audit = sum(audit_scores.values()) / len(audit_scores)
 
     print(f"\n{'='*56}")
     print(f"  📊 PER-TASK SCORES:")
-    for task, score in scores.items():
-        bar = "█" * int(score * 20)
-        print(f"     {task:8s}: {score:.4f}  {bar}")
+    for task in tasks:
+        t_bar = "█" * int(triage_scores[task] * 10)
+        a_bar = "█" * int(audit_scores[task] * 10)
+        print(f"     {task:8s}: triage={triage_scores[task]:.4f} {t_bar}  audit={audit_scores[task]:.4f} {a_bar}")
     print(f"  {'─'*52}")
-    print(f"  🏁 FINAL AVERAGE SCORE: {final_avg:.4f}")
+    print(f"  🔍 AVG TRIAGE SCORE: {avg_triage:.4f}")
+    print(f"  🏁 AVG AUDIT SCORE:  {avg_audit:.4f}")
     print(f"{'='*56}\n")
 
     # Exit 0 = success (required by baseline-reproduces gate)

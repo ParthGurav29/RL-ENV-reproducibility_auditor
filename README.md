@@ -22,6 +22,29 @@ The **Reproducibility Auditor** is a full-featured OpenEnv environment designed 
 ### Motivation
 Modern ML research and production environments suffer from "reproducibility debt." Small omissions (like missing random seeds, unpinned dependencies, or non-deterministic CUDA operations) can lead to irreproducible results and wasted compute. This environment trains or evaluates agents to act as **Principal Systems Architects**, forensic auditors who ensure experiments are repeatable and mathematically deterministic.
 
+**Real-world application:** An agent trained on this environment could power CI/CD checks that automatically flag reproducibility issues in ML codebases before results are published — similar to a linter, but for scientific correctness.
+
+---
+
+### Multi-Step Episode Design
+
+Each episode consists of **2 steps**, providing trajectory-level reward signal:
+
+```
+reset() → Observation (code files)
+   ↓
+Step 1: TRIAGE → Agent identifies suspicious files + violation categories
+   ↓         → Gets intermediate reward (F1 on file/category identification)
+   ↓         → Gets actionable feedback (confirmed/rejected claims)
+   ↓
+Step 2: AUDIT → Agent submits full violation report (informed by triage feedback)
+   ↓         → Gets final reward (per-violation detection score)
+   ↓
+Episode Done (terminated=True)
+```
+
+This 2-step design forces agents to develop genuine reasoning trajectories rather than one-shot pattern matching.
+
 ---
 
 ### Environment Specification
@@ -29,24 +52,48 @@ Modern ML research and production environments suffer from "reproducibility debt
 #### Observation space
 *   **Type:** `text`
 *   **Content:** A raw, concatenated dump of the experiment's source code files (e.g., `train.py`, `dataset.py`, `requirements.txt`).
+*   **Step 2 enhancement:** After triage, the observation is augmented with feedback confirming/rejecting the agent's preliminary claims.
 
-#### Action space
-*   **Type:** `json` (Validated via Pydantic model `AuditAction`)
-*   **Schema:**
-    *   `violations`: `list[ViolationObject]` — Each with `violation_type`, `file_name`, `line_number`, `suggested_fix_code`.
-    *   `reproducibility_score`: `float` (0.0–1.0) — Agent's self-assessed score.
-    *   `explanation`: `str` — Human-readable summary of the audit.
+#### Action space (2-step)
+
+**Step 1 — Triage Action:**
+```json
+{
+  "suspicious_files": ["train.py", "requirements.txt"],
+  "suspected_categories": ["random_seeds", "dependency_pinning"],
+  "reasoning": "train.py lacks seed calls; requirements.txt has unpinned versions"
+}
+```
+
+**Step 2 — Audit Action:**
+```json
+{
+  "violations": [
+    {
+      "violation_type": "random.seed missing",
+      "file_name": "train.py",
+      "line_number": 5,
+      "suggested_fix_code": "random.seed(42)"
+    }
+  ],
+  "reproducibility_score": 0.3,
+  "explanation": "Multiple seed calls are missing."
+}
+```
+
+#### Violation Categories
+`random_seeds` · `dependency_pinning` · `determinism_flags` · `environment_config` · `dataloader_reproducibility` · `model_initialization` · `configuration_management` · `multiprocessing` · `rng_initialization`
 
 #### Reward Function
-The environment uses a **deterministic keyword-matching grader** with:
-*   **Reward range:** `[0.0, 1.0]`
-*   **Partial credit:** Each correctly identified violation earns `1/N` where N is the number of active violations in that episode.
-*   **False-positive penalty:** Claiming violations that are not present in the episode reduces the score by `0.5/N` per false positive.
-*   **Per-field validation:** Keywords are checked in `violation_type` and `suggested_fix_code` only — not in `explanation` or `file_name`.
-*   **Bidirectional negation guard:** Dismissive phrases before or after the keyword are rejected.
+*   **Reward range:** `[0.0, 1.0]` (both triage and audit steps)
+*   **Triage reward:** F1 score on file identification (40%) + category identification (60%)
+*   **Audit reward:** Partial credit per violation. Each hit earns `1/N` where N = active violations.
+*   **False-positive penalty:** Each false positive costs `1.0/N` — making keyword spamming strictly unprofitable.
+*   **Per-field validation:** Keywords checked in `violation_type` and `suggested_fix_code` only.
+*   **Bidirectional negation guard:** Dismissive phrases before/after keywords are rejected.
 
 #### Dynamic Violation Injection
-Each call to `reset()` randomly selects a subset of violations from the pool, generating unique experiment files with only those bugs present. This prevents memorisation and forces genuine code reasoning.
+Each `reset()` randomly selects a subset of violations from the pool, generating unique experiment files with only those bugs present. This prevents memorisation and forces genuine code reasoning.
 
 ---
 
@@ -69,8 +116,8 @@ Each call to `reset()` randomly selects a subset of violations from the pool, ge
 | `/health` | GET | Health check — returns `{"status": "ok"}` with HTTP 200 |
 | `/spec` | GET | Static environment metadata |
 | `/reset` | POST | Reset environment, returns observation + active violations |
-| `/step` | POST | Submit action, returns reward + breakdown |
-| `/state` | GET | Current environment state |
+| `/step` | POST | Step 1: triage → feedback. Step 2: audit → final score |
+| `/state` | GET | Current environment state with triage tracking |
 | `/leaderboard` | GET | Scoring history with per-task statistics |
 
 ---
@@ -107,6 +154,7 @@ docker run -p 7860:7860 \
 
 ```bash
 # inference.py must be in root directory — uses OpenAI client for all LLM calls
+# Runs 2-step episodes: triage → feedback → audit for each task
 python inference.py
 python inference.py --server http://localhost:7860
 ```
@@ -125,7 +173,7 @@ python validate.py
 ```
 ├── env/
 │   ├── __init__.py
-│   ├── base_env.py          # Gymnasium environment
+│   ├── base_env.py          # Gymnasium environment (2-step episodes)
 │   ├── openenv_wrapper.py   # OpenEnv spec-compliant wrapper
 │   ├── generators.py        # Dynamic task file generators (30 violations)
 │   └── graders/

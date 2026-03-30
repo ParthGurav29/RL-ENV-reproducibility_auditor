@@ -5,6 +5,8 @@ validate.py — Pre-submission validation script for the OpenEnv Hackathon.
 Runs every item in the pre-submission checklist automatically.
 Must be run with the server already started on localhost:7860.
 
+Updated for 2-step episodes (triage → audit).
+
 Usage:
     # Terminal 1:
     uvicorn server:app --host 0.0.0.0 --port 7860
@@ -44,12 +46,12 @@ def run_validation(server: str) -> bool:
     results = []
 
     print(f"\n{'='*60}")
-    print(f"  OpenEnv Pre-Submission Validator")
+    print(f"  OpenEnv Pre-Submission Validator (2-step episodes)")
     print(f"  Target: {server}")
     print(f"{'='*60}\n")
 
     # ── 1. Health / Deployment ────────────────────────────────────────────────
-    print("📡  [1/5] Deployment & Health Check")
+    print("📡  [1/6] Deployment & Health Check")
     try:
         r = get(server, "/health")
         ok = r.status_code == 200
@@ -62,7 +64,7 @@ def run_validation(server: str) -> bool:
         sys.exit(1)
 
     # ── 2. OpenEnv Spec compliance ────────────────────────────────────────────
-    print("\n📋  [2/5] OpenEnv Spec Compliance (/spec)")
+    print("\n📋  [2/6] OpenEnv Spec Compliance (/spec)")
     r = get(server, "/spec")
     spec = r.json() if r.status_code == 200 else {}
     results.append(check("/spec returns HTTP 200", r.status_code == 200))
@@ -73,11 +75,19 @@ def run_validation(server: str) -> bool:
     results.append(check("spec.observation_type present", "observation_type" in spec))
     results.append(check("spec.action_schema present", "action_schema" in spec))
     results.append(check("spec.randomization described", bool(spec.get("randomization"))))
+    results.append(check("spec.episode_steps is 2", spec.get("episode_steps") == 2,
+                   f"found={spec.get('episode_steps')}"))
 
-    # ── 3. reset() / step() functional test ──────────────────────────────────
-    print("\n🔄  [3/5] reset() / step() Functional Test")
+    # Check for multi-step schema
+    action_schema = spec.get("action_schema", {})
+    results.append(check("action_schema has triage + audit schemas",
+                   "step_1_triage" in action_schema and "step_2_audit" in action_schema,
+                   f"keys={list(action_schema.keys())}"))
+
+    # ── 3. 2-step reset() / step() functional test ───────────────────────────
+    print("\n🔄  [3/6] Multi-Step reset() / step() Functional Test")
     for task in TASKS:
-        # reset
+        # Step 0: Reset
         r_reset = post(server, "/reset", {"task": task})
         reset_ok = r_reset.status_code == 200
         reset_data = r_reset.json() if reset_ok else {}
@@ -85,28 +95,53 @@ def run_validation(server: str) -> bool:
         has_obs = isinstance(reset_data.get("observation"), str) and len(reset_data.get("observation", "")) > 10
         has_active = isinstance(reset_data.get("info", {}).get("active_violations"), list)
         active_count = len(reset_data.get("info", {}).get("active_violations", []))
+        max_steps = reset_data.get("info", {}).get("max_steps", 0)
 
         results.append(check(f"/reset [{task}] returns observation", has_obs,
                        f"obs_len={len(reset_data.get('observation',''))}"))
         results.append(check(f"/reset [{task}] returns active_violations", has_active,
                        f"count={active_count}"))
+        results.append(check(f"/reset [{task}] max_steps=2", max_steps == 2,
+                       f"max_steps={max_steps}"))
 
-        # step with empty action → should return 0.0 reward
-        empty_action = {"violations": [], "reproducibility_score": 0.0, "explanation": "empty"}
-        r_step = post(server, "/step", {"task": task, "action": empty_action})
+        # Step 1: Triage (empty triage action)
+        empty_triage = {"suspicious_files": [], "suspected_categories": [], "reasoning": "empty triage"}
+        r_triage = post(server, "/step", {"task": task, "action": empty_triage})
+        triage_ok = r_triage.status_code == 200
+        triage_data = r_triage.json() if triage_ok else {}
+        triage_reward = triage_data.get("reward", -1)
+        triage_terminated = triage_data.get("terminated", True)
+        triage_step_type = triage_data.get("info", {}).get("step_type", "")
+
+        results.append(check(f"/step1 [{task}] triage returns reward in [0,1]",
+                       triage_ok and 0.0 <= triage_reward <= 1.0,
+                       f"reward={triage_reward}"))
+        results.append(check(f"/step1 [{task}] terminated=False (not done yet)",
+                       not triage_terminated))
+        results.append(check(f"/step1 [{task}] step_type=triage",
+                       triage_step_type == "triage",
+                       f"got={triage_step_type}"))
+        results.append(check(f"/step1 [{task}] triage_feedback present",
+                       isinstance(triage_data.get("info", {}).get("triage_feedback"), dict)))
+
+        # Step 2: Audit (empty audit action)
+        empty_audit = {"violations": [], "reproducibility_score": 0.0, "explanation": "empty"}
+        r_step = post(server, "/step", {"task": task, "action": empty_audit})
         step_ok = r_step.status_code == 200
         step_data = r_step.json() if step_ok else {}
         reward = step_data.get("reward", -1)
         terminated = step_data.get("terminated", False)
 
-        results.append(check(f"/step  [{task}] returns reward in [0,1]", step_ok and 0.0 <= reward <= 1.0,
+        results.append(check(f"/step2 [{task}] audit returns reward in [0,1]",
+                       step_ok and 0.0 <= reward <= 1.0,
                        f"reward={reward}"))
-        results.append(check(f"/step  [{task}] terminated=True (single-step)", terminated))
-        results.append(check(f"/step  [{task}] score_breakdown present",
+        results.append(check(f"/step2 [{task}] terminated=True (episode done)",
+                       terminated))
+        results.append(check(f"/step2 [{task}] score_breakdown present",
                        isinstance(step_data.get("info", {}).get("score_breakdown"), dict)))
 
     # ── 4. Grader varying scores ──────────────────────────────────────────────
-    print("\n🎲  [4/5] Grader Score Variance (anti-disqualification)")
+    print("\n🎲  [4/6] Grader Score Variance (anti-disqualification)")
 
     # Keyword maps: violation_id → (violation_type phrase, suggested_fix_code phrase)
     VIOLATION_KEYWORDS = {
@@ -122,7 +157,6 @@ def run_validation(server: str) -> bool:
         "missing_hashseed":            ("pythonhashseed not set", 'os.environ["PYTHONHASHSEED"] = "0"'),
         "missing_cudnn_deterministic": ("cudnn.deterministic not set", "torch.backends.cudnn.deterministic = True"),
         "missing_cudnn_benchmark_off": ("cudnn.benchmark not disabled", "torch.backends.cudnn.benchmark = False"),
-        "missing_set_num_threads":     ("set_num_threads missing", "torch.set_num_threads(1)"),
         # Medium
         "dataloader_shuffle_no_seed":  ("dataloader shuffle without seed", "generator=torch.Generator().manual_seed(42)"),
         "missing_deterministic_flag":  ("use_deterministic_algorithms missing", "torch.use_deterministic_algorithms(True)"),
@@ -138,21 +172,34 @@ def run_validation(server: str) -> bool:
         "config_yaml_override":        ("cli override config.yaml seed", "np.random.seed(active_seed)"),
         "hash_randomization":          ("pythonhashseed not set", 'os.environ["PYTHONHASHSEED"] = "0"'),
         "multiprocessing_no_seed":     ("multiprocessing pool spawn without seed", "initializer=mp_init"),
-        "late_hashseed":               ("late hashseed after startup too late", "set PYTHONHASHSEED before python"),
         "deterministic_without_cublas":("use_deterministic_algorithms without cublas", 'os.environ["CUBLAS_WORKSPACE_CONFIG"]=":4096:8"'),
         "incomplete_cuda_seed":        ("manual_seed_all vs manual_seed multi-gpu", "torch.cuda.manual_seed_all(seed)"),
     }
 
     for task in TASKS:
-        # -- Empty action: expect reward = 0.0 --------------------------------
-        reset0 = post(server, "/reset", {"task": task})
+        # -- Empty 2-step: expect audit reward = 0.0 --------------------------
+        post(server, "/reset", {"task": task})
+        # Step 1: empty triage
+        post(server, "/step", {"task": task, "action": {
+            "suspicious_files": [], "suspected_categories": [], "reasoning": "nothing"}})
+        # Step 2: empty audit
         r0 = post(server, "/step", {"task": task, "action": {
             "violations": [], "reproducibility_score": 0.0, "explanation": "nothing"}})
 
-        # -- Correct action: use active violations to get reward > 0 -----------
+        # -- Correct 2-step: use active violations to get reward > 0 -----------
         reset_data = post(server, "/reset", {"task": task}).json()
         active = reset_data.get("info", {}).get("active_violations", [])
-        
+
+        # Step 1: correct triage (list correct files and categories)
+        from env.base_env import VIOLATION_FILE_MAP, VIOLATION_CATEGORY_MAP
+        correct_files = list({VIOLATION_FILE_MAP[v] for v in active if v in VIOLATION_FILE_MAP})
+        correct_cats = list({VIOLATION_CATEGORY_MAP[v] for v in active if v in VIOLATION_CATEGORY_MAP})
+        post(server, "/step", {"task": task, "action": {
+            "suspicious_files": correct_files,
+            "suspected_categories": correct_cats,
+            "reasoning": "Correct triage using ground truth"}})
+
+        # Step 2: correct audit
         submitted_violations = []
         for v_id in active:
             if v_id in VIOLATION_KEYWORDS:
@@ -172,11 +219,11 @@ def run_validation(server: str) -> bool:
 
         s0 = r0.json().get("reward", -1) if r0.status_code == 200 else -1
         s1 = r1.json().get("reward", -1) if r1.status_code == 200 else -1
-        results.append(check(f"[{task}] scores differ between empty vs. correct action",
-                       s0 != s1 or s1 > 0, f"empty={s0:.4f}, claim={s1:.4f}"))
+        results.append(check(f"[{task}] audit scores differ between empty vs. correct action",
+                       s0 != s1 or s1 > 0, f"empty={s0:.4f}, correct={s1:.4f}"))
 
     # ── 5. /state endpoint ────────────────────────────────────────────────────
-    print("\n🗂️   [5/5] State Endpoint")
+    print("\n🗂️   [5/6] State Endpoint")
     for task in TASKS:
         post(server, "/reset", {"task": task})
         r_state = get(server, f"/state?task={task}")
@@ -185,6 +232,38 @@ def run_validation(server: str) -> bool:
         results.append(check(f"/state [{task}] returns active_violations",
                        "active_violations" in state_data,
                        f"step_count={state_data.get('step_count')}"))
+        results.append(check(f"/state [{task}] has max_steps=2",
+                       state_data.get("max_steps") == 2,
+                       f"max_steps={state_data.get('max_steps')}"))
+        results.append(check(f"/state [{task}] tracks triage_completed",
+                       "triage_completed" in state_data,
+                       f"triage_completed={state_data.get('triage_completed')}"))
+
+    # ── 6. Multi-step trajectory signal ──────────────────────────────────────
+    print("\n📈  [6/6] Trajectory Signal Verification")
+    for task in TASKS:
+        post(server, "/reset", {"task": task})
+
+        # Good triage
+        good_triage = post(server, "/step", {"task": task, "action": {
+            "suspicious_files": ["train.py", "requirements.txt"],
+            "suspected_categories": ["random_seeds", "dependency_pinning"],
+            "reasoning": "These are common violation sites"}})
+        good_triage_reward = good_triage.json().get("reward", 0) if good_triage.status_code == 200 else 0
+
+        # Skip audit for this test — just reset again
+        post(server, "/reset", {"task": task})
+
+        # Bad triage (completely wrong)
+        bad_triage = post(server, "/step", {"task": task, "action": {
+            "suspicious_files": ["nonexistent.py"],
+            "suspected_categories": ["nonexistent_category"],
+            "reasoning": "Random guess"}})
+        bad_triage_reward = bad_triage.json().get("reward", 0) if bad_triage.status_code == 200 else 0
+
+        results.append(check(f"[{task}] triage rewards differ (good vs bad)",
+                       good_triage_reward > bad_triage_reward or good_triage_reward > 0,
+                       f"good={good_triage_reward:.4f}, bad={bad_triage_reward:.4f}"))
 
     # ── Summary ───────────────────────────────────────────────────────────────
     total = len(results)

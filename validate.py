@@ -172,8 +172,6 @@ def run_validation(server: str) -> bool:
         "config_yaml_override":        ("cli override config.yaml seed", "np.random.seed(active_seed)"),
         "hash_randomization":          ("pythonhashseed not set", 'os.environ["PYTHONHASHSEED"] = "0"'),
         "multiprocessing_no_seed":     ("multiprocessing pool spawn without seed", "initializer=mp_init"),
-        "deterministic_without_cublas":("use_deterministic_algorithms without cublas", 'os.environ["CUBLAS_WORKSPACE_CONFIG"]=":4096:8"'),
-        "incomplete_cuda_seed":        ("manual_seed_all vs manual_seed multi-gpu", "torch.cuda.manual_seed_all(seed)"),
     }
 
     for task in TASKS:
@@ -204,9 +202,10 @@ def run_validation(server: str) -> bool:
         for v_id in active:
             if v_id in VIOLATION_KEYWORDS:
                 v_type, fix = VIOLATION_KEYWORDS[v_id]
+                correct_file = VIOLATION_FILE_MAP.get(v_id, "train.py")
                 submitted_violations.append({
                     "violation_type": v_type,
-                    "file_name": "train.py",
+                    "file_name": correct_file,
                     "line_number": 1,
                     "suggested_fix_code": fix
                 })

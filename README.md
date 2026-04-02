@@ -86,10 +86,10 @@ This 2-step design forces agents to develop genuine reasoning trajectories rathe
 
 #### Reward Function
 *   **Reward range:** `[0.0, 1.0]` (both triage and audit steps)
-*   **Triage reward:** F1 score on file identification (40%) + category identification (60%)
+*   **Triage reward:** F1 score on file identification (60%) + category identification (40%)
 *   **Audit reward:** Partial credit per violation. Each hit earns `1/N` where N = active violations.
 *   **False-positive penalty:** Each false positive costs `1.0/N` — making keyword spamming strictly unprofitable.
-*   **Per-field validation:** Keywords checked in `violation_type` and `suggested_fix_code` only.
+*   **Per-field validation:** Keywords checked in `violation_type` and `suggested_fix_code` only. `file_name` validated against expected file per violation type.
 *   **Bidirectional negation guard:** Dismissive phrases before/after keywords are rejected.
 
 #### Dynamic Violation Injection
@@ -101,11 +101,11 @@ Each `reset()` randomly selects a subset of violations from the pool, generating
 
 | Task ID | Level | Violations Pool | Per-Episode | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `easy` | 🟢 Easy | 12 | 5–9 | Seeds, unpinned deps, PYTHONHASHSEED, cuDNN flags, thread count. |
+| `easy` | 🟢 Easy | 11 | 5–9 | Seeds, unpinned deps, PYTHONHASHSEED, cuDNN flags. |
 | `medium` | 🟡 Medium | 8 | 4–6 | PyTorch determinism flags, DataLoader, Generator seeds, default_rng, Dropout. |
-| `hard` | 🔴 Hard | 10 | 5–8 | Cross-file audits, version conflicts, multiprocessing, late hashseed, CUBLAS ordering. |
+| `hard` | 🔴 Hard | 7 | 5–7 | Cross-file audits, version conflicts, multiprocessing, CUBLAS ordering. |
 
-**Total violation pool: 30** — producing thousands of unique episode configurations.
+**Total violation pool: 26** — producing thousands of unique episode configurations.
 
 ---
 
@@ -178,15 +178,15 @@ python validate.py
 │   ├── generators.py        # Dynamic task file generators (30 violations)
 │   └── graders/
 │       ├── __init__.py
-│       ├── easy_grader.py   # 12-violation grader
-│       ├── medium_grader.py # 8-violation grader
-│       └── hard_grader.py   # 10-violation grader
-├── tasks/                   # Reference static task files
+│       ├── easy_grader.py   # 11-violation grader with file validation
+│       ├── medium_grader.py # 8-violation grader with file validation
+│       └── hard_grader.py   # 7-violation grader with file validation
 ├── server.py                # FastAPI OpenEnv server
 ├── app.py                   # Hugging Face Spaces / Docker entrypoint
 ├── inference.py             # Baseline inference script (root directory, required)
 ├── openenv.yaml             # OpenEnv spec file
 ├── Dockerfile
+├── .dockerignore
 ├── docker-compose.yml
 ├── requirements.txt
 └── validate.py              # Pre-submission validation suite

@@ -1,6 +1,0 @@
-
-
-torch==2.1.2
-torchvision==0.17.0
-# BUG: torchvision 0.17.0 expects torch 2.2.0, this is an incompatible combo
-numpy==1.26.3

@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Application code ──────────────────────────────────────────────────────────
 COPY env/          ./env/
-COPY tasks/        ./tasks/
 COPY server.py     .
 COPY app.py        .
 COPY inference.py  .

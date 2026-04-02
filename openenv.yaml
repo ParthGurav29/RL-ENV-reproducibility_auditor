@@ -2,7 +2,7 @@ version: "1.0.0"
 env_id: "reproducibility-auditor-v1"
 description: >
   An RL environment where agents act as ML reproducibility auditors.
-  30 violation types across seeds, determinism flags, cross-file gaps,
+  26 violation types across seeds, determinism flags, cross-file gaps,
   and advanced issues. Dynamic violation injection per episode prevents
   memorisation. Two-step episodes with intermediate triage feedback.
   Rewards in [0.0, 1.0] with partial credit and false-positive penalty.
@@ -31,11 +31,11 @@ tasks:
   - id: "hard"
     name: "Advanced Cross-File Audit"
     description: >
-      9-violation pool: cross-file seeds, version conflicts, multiprocessing,
-      CUBLAS ordering, incomplete CUDA seeds.
+      7-violation pool: cross-file seeds, version conflicts, multiprocessing,
+      CUBLAS ordering, config overrides, hash randomization.
       5–7 active violations per episode.
     difficulty: "hard"
-    violation_pool_size: 9
+    violation_pool_size: 7
     active_violations_range: [5, 7]
 
 # ── Interface Specification ──────────────────────────────────────────────────

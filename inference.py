@@ -1,17 +1,33 @@
 """
 inference.py — Official OpenEnv Baseline Script
 ================================================
-Calls the live HTTP server (not local imports) to fully exercise the
-OpenEnv REST contract, mirroring exactly what the eval harness does.
+MANDATORY
+- Before submitting, ensure the following variables are defined in your environment configuration:
+    API_BASE_URL   The API endpoint for the LLM.
+    MODEL_NAME     The model identifier to use for inference.
+    HF_TOKEN       Your Hugging Face / API key.
+
+- The inference script must be named `inference.py` and placed in the root directory of the project
+- Participants must use OpenAI Client for all LLM calls using above variables
+
+STDOUT FORMAT
+- The script emits exactly three structured line types to stdout:
+
+    [START] task=<task_name> env=<benchmark> model=<model_name>
+    [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+    [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...,rn>
+
+  Rules:
+    - One [START] line at episode begin.
+    - One [STEP] line per step, immediately after env.step() returns.
+    - One [END] line at episode end, always emitted (even on exception).
+    - reward and rewards are formatted to 2 decimal places.
+    - done and success are lowercase booleans: true or false.
+    - error is the raw error string, or null if none.
 
 Multi-step episodes (2-step):
   Step 1 — Triage: Identify suspicious files and violation categories
   Step 2 — Audit:  Full violation report using triage feedback
-
-Required environment variables (all defined per OpenEnv hackathon spec):
-  API_BASE_URL  — LLM API endpoint (OpenAI-compatible), e.g. https://api-inference.huggingface.co/v1/
-  MODEL_NAME    — Model identifier, e.g. Qwen/Qwen2.5-72B-Instruct
-  HF_TOKEN      — Hugging Face API key (also accepted as OPENAI_API_KEY)
 
 Usage:
   export API_BASE_URL="https://api-inference.huggingface.co/v1/"
@@ -27,6 +43,7 @@ import json
 import time
 import argparse
 import requests
+from typing import Optional, List
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -54,6 +71,37 @@ REQUEST_TIMEOUT = 30   # seconds per HTTP call
 LLM_TIMEOUT     = 60   # seconds per LLM call
 LLM_MAX_RETRIES = 3    # retry LLM calls on failure
 LLM_RETRY_DELAY = 2    # seconds between retries
+
+# ── OpenEnv metadata ─────────────────────────────────────────────────────────
+BENCHMARK = "reproducibility-auditor-v1"
+SUCCESS_SCORE_THRESHOLD = 0.1   # normalized score in [0, 1]
+
+# ── Structured stdout log helpers (MANDATORY FORMAT) ─────────────────────────
+
+
+def log_start(task: str, env: str, model: str) -> None:
+    """Emit [START] line at episode begin."""
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    """Emit [STEP] line immediately after env.step() returns."""
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    """Emit [END] line at episode end — always emitted, even on exception."""
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
+
 
 # ── System prompts ───────────────────────────────────────────────────────────
 
@@ -167,14 +215,14 @@ def _call_server(server: str, method: str, path: str, payload: dict | None = Non
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.ConnectionError:
-        print(f"  ❌ Cannot connect to server at {server}.")
-        print(f"     Start the server first:  uvicorn server:app --host 0.0.0.0 --port 7860")
+        print(f"[DEBUG] Cannot connect to server at {server}.", flush=True)
+        print(f"[DEBUG] Start the server first: uvicorn server:app --host 0.0.0.0 --port 7860", flush=True)
         sys.exit(1)
     except requests.exceptions.Timeout:
-        print(f"  ❌ Server request timed out ({REQUEST_TIMEOUT}s)")
+        print(f"[DEBUG] Server request timed out ({REQUEST_TIMEOUT}s)", flush=True)
         raise
     except requests.exceptions.HTTPError as e:
-        print(f"  ❌ Server error {e.response.status_code}: {e.response.text[:200]}")
+        print(f"[DEBUG] Server error {e.response.status_code}: {e.response.text[:200]}", flush=True)
         raise
 
 
@@ -193,7 +241,7 @@ def _call_llm_with_retry(client: OpenAI, messages: list, model: str) -> str:
         except Exception as e:
             last_error = e
             if attempt < LLM_MAX_RETRIES:
-                print(f"   ⚠️  LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}")
+                print(f"[DEBUG] LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}", flush=True)
                 time.sleep(LLM_RETRY_DELAY)
     raise last_error if last_error else RuntimeError("LLM call failed")
 
@@ -250,73 +298,117 @@ def _sanitize_audit_dict(audit: dict) -> dict:
 
 
 def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, float]:
-    """Run one 2-step task episode via the HTTP server. Returns (triage_reward, audit_reward)."""
-    print(f"\n🔍 Evaluating Task: {task_name.upper()}")
+    """Run one 2-step task episode via the HTTP server.
 
-    # ── Step 0: Reset ─────────────────────────────────────────────────────────
-    reset_data = _call_server(server, "POST", "/reset", {"task": task_name})
-    observation = reset_data.get("observation", "")
-    active = reset_data.get("info", {}).get("active_violations", [])
-    max_steps = reset_data.get("info", {}).get("max_steps", 2)
-    print(f"   Active violations this episode: {len(active)}")
-    print(f"   Episode steps: {max_steps}")
+    Emits mandatory [START], [STEP], [END] structured logs.
+    Returns (triage_reward, audit_reward).
+    """
+    rewards_list: List[float] = []
+    steps_taken = 0
+    score = 0.0
+    success = False
+    triage_reward = 0.0
+    audit_reward = 0.0
 
-    # ── Step 1: Triage ────────────────────────────────────────────────────────
-    print(f"\n   📋 Step 1/2: Triage ...")
+    # ── [START] — one per task episode ────────────────────────────────────────
+    log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
+
     try:
-        triage_str = _call_llm_with_retry(client, [
-            {"role": "system", "content": TRIAGE_PROMPT},
-            {"role": "user",   "content": observation},
-        ], MODEL_NAME)
-        triage_dict = _parse_llm_json(triage_str)
-    except json.JSONDecodeError as e:
-        print(f"   ⚠️  LLM returned invalid triage JSON: {e}")
-        triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": "Parse error"}
+        # ── Step 0: Reset ─────────────────────────────────────────────────────
+        reset_data = _call_server(server, "POST", "/reset", {"task": task_name})
+        observation = reset_data.get("observation", "")
+        active = reset_data.get("info", {}).get("active_violations", [])
+        max_steps = reset_data.get("info", {}).get("max_steps", 2)
+        print(f"[DEBUG] Task {task_name}: {len(active)} active violations, {max_steps} steps", flush=True)
+
+        # ── Step 1: Triage ────────────────────────────────────────────────────
+        triage_error = None
+        try:
+            triage_str = _call_llm_with_retry(client, [
+                {"role": "system", "content": TRIAGE_PROMPT},
+                {"role": "user",   "content": observation},
+            ], MODEL_NAME)
+            triage_dict = _parse_llm_json(triage_str)
+        except json.JSONDecodeError as e:
+            triage_error = str(e)
+            print(f"[DEBUG] LLM returned invalid triage JSON: {e}", flush=True)
+            triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": "Parse error"}
+        except Exception as e:
+            triage_error = str(e)
+            print(f"[DEBUG] LLM triage call failed: {e}", flush=True)
+            triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": str(e)}
+
+        # Submit triage to server
+        triage_result = _call_server(server, "POST", "/step", {"task": task_name, "action": triage_dict})
+        triage_reward = triage_result.get("reward", 0.0)
+        triage_feedback = triage_result.get("info", {}).get("triage_feedback", {})
+        enhanced_obs = triage_result.get("observation", observation)
+
+        rewards_list.append(triage_reward)
+        steps_taken = 1
+
+        # ── [STEP] — triage result ────────────────────────────────────────────
+        triage_action_str = (
+            f"triage(files={len(triage_dict.get('suspicious_files', []))},"
+            f"categories={len(triage_dict.get('suspected_categories', []))})"
+        )
+        log_step(step=1, action=triage_action_str, reward=triage_reward, done=False, error=triage_error)
+
+        print(f"[DEBUG] Triage reward: {triage_reward:.4f}", flush=True)
+        if triage_feedback.get("files_confirmed"):
+            print(f"[DEBUG] Confirmed files: {', '.join(triage_feedback['files_confirmed'])}", flush=True)
+        if triage_feedback.get("categories_confirmed"):
+            print(f"[DEBUG] Confirmed categories: {', '.join(triage_feedback['categories_confirmed'])}", flush=True)
+
+        # ── Step 2: Full Audit ────────────────────────────────────────────────
+        audit_error = None
+        try:
+            audit_str = _call_llm_with_retry(client, [
+                {"role": "system", "content": AUDIT_PROMPT},
+                {"role": "user",   "content": enhanced_obs},
+            ], MODEL_NAME)
+            audit_dict = _parse_llm_json(audit_str)
+        except json.JSONDecodeError as e:
+            audit_error = str(e)
+            print(f"[DEBUG] LLM returned invalid audit JSON: {e}", flush=True)
+            audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": "Parse error"}
+        except Exception as e:
+            audit_error = str(e)
+            print(f"[DEBUG] LLM audit call failed: {e}", flush=True)
+            audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": str(e)}
+
+        # Sanitize common LLM typos in violation keys
+        audit_dict = _sanitize_audit_dict(audit_dict)
+
+        # Submit audit to server
+        step_data = _call_server(server, "POST", "/step", {"task": task_name, "action": audit_dict})
+        audit_reward = step_data.get("reward", 0.0)
+
+        rewards_list.append(audit_reward)
+        steps_taken = 2
+
+        # ── [STEP] — audit result ─────────────────────────────────────────────
+        audit_action_str = f"audit(violations={len(audit_dict.get('violations', []))})"
+        log_step(step=2, action=audit_action_str, reward=audit_reward, done=True, error=audit_error)
+
+        # Debug: print score breakdown
+        breakdown = step_data.get("info", {}).get("score_breakdown", {})
+        for check, passed in breakdown.items():
+            icon = "✅" if passed else "❌"
+            print(f"[DEBUG]  {icon}  {check}", flush=True)
+        print(f"[DEBUG] Audit reward: {audit_reward:.4f}", flush=True)
+
+        # Compute final score for this task
+        score = sum(rewards_list) / len(rewards_list) if rewards_list else 0.0
+        score = min(max(score, 0.0), 1.0)
+        success = score >= SUCCESS_SCORE_THRESHOLD
+
     except Exception as e:
-        print(f"   ⚠️  LLM triage call failed after {LLM_MAX_RETRIES} attempts: {e}")
-        triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": str(e)}
+        print(f"[DEBUG] Task {task_name} failed with error: {e}", flush=True)
 
-    # Submit triage to server
-    triage_result = _call_server(server, "POST", "/step", {"task": task_name, "action": triage_dict})
-    triage_reward = triage_result.get("reward", 0.0)
-    triage_feedback = triage_result.get("info", {}).get("triage_feedback", {})
-    enhanced_obs = triage_result.get("observation", observation)
-
-    print(f"   📊 Triage reward: {triage_reward:.4f}")
-    if triage_feedback.get("files_confirmed"):
-        print(f"   ✅ Confirmed files: {', '.join(triage_feedback['files_confirmed'])}")
-    if triage_feedback.get("categories_confirmed"):
-        print(f"   ✅ Confirmed categories: {', '.join(triage_feedback['categories_confirmed'])}")
-
-    # ── Step 2: Full Audit ────────────────────────────────────────────────────
-    print(f"\n   🔬 Step 2/2: Full Audit ...")
-    try:
-        audit_str = _call_llm_with_retry(client, [
-            {"role": "system", "content": AUDIT_PROMPT},
-            {"role": "user",   "content": enhanced_obs},
-        ], MODEL_NAME)
-        audit_dict = _parse_llm_json(audit_str)
-    except json.JSONDecodeError as e:
-        print(f"   ⚠️  LLM returned invalid audit JSON: {e}")
-        audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": "Parse error"}
-    except Exception as e:
-        print(f"   ⚠️  LLM audit call failed after {LLM_MAX_RETRIES} attempts: {e}")
-        return triage_reward, 0.0
-
-    # Sanitize common LLM typos in violation keys (e.g. violution_type)
-    audit_dict = _sanitize_audit_dict(audit_dict)
-
-    # Submit audit to server
-    step_data = _call_server(server, "POST", "/step", {"task": task_name, "action": audit_dict})
-
-    audit_reward = step_data.get("reward", 0.0)
-    breakdown = step_data.get("info", {}).get("score_breakdown", {})
-
-    for check, passed in breakdown.items():
-        icon = "✅" if passed else "❌"
-        print(f"    {icon}  {check}")
-    print(f"    ── Triage reward:  {triage_reward:.4f}")
-    print(f"    ── Audit reward:   {audit_reward:.4f}")
+    finally:
+        # ── [END] — always emitted, even on exception ────────────────────────
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards_list)
 
     return triage_reward, audit_reward
 
@@ -342,31 +434,31 @@ def main():
         missing.append("HF_TOKEN (or OPENAI_API_KEY)")
 
     if missing:
-        print("❌ ERROR: Missing required environment variables:")
+        print("[DEBUG] ERROR: Missing required environment variables:", flush=True)
         for var in missing:
-            print(f"   export {var}='...'")
-        print("\nAll three variables are required by the OpenEnv hackathon spec.")
+            print(f"[DEBUG]   export {var}='...'", flush=True)
+        print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", flush=True)
         sys.exit(1)
 
-    print(f"\n{'='*56}")
-    print(f"  OpenEnv Reproducibility Auditor — Baseline")
-    print(f"{'='*56}")
-    print(f"  API_BASE_URL : {API_BASE_URL}")
-    print(f"  MODEL_NAME   : {MODEL_NAME}")
-    print(f"  HF_TOKEN     : {'✅ set' if HF_TOKEN else '❌ not set'}")
-    print(f"  Server       : {args.server}")
-    print(f"  Episode mode : 2-step (triage → audit)")
-    print(f"{'='*56}\n")
+    print(f"[DEBUG] {'='*56}", flush=True)
+    print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", flush=True)
+    print(f"[DEBUG] {'='*56}", flush=True)
+    print(f"[DEBUG]   API_BASE_URL : {API_BASE_URL}", flush=True)
+    print(f"[DEBUG]   MODEL_NAME   : {MODEL_NAME}", flush=True)
+    print(f"[DEBUG]   HF_TOKEN     : {'set' if HF_TOKEN else 'not set'}", flush=True)
+    print(f"[DEBUG]   Server       : {args.server}", flush=True)
+    print(f"[DEBUG]   Episode mode : 2-step (triage → audit)", flush=True)
+    print(f"[DEBUG] {'='*56}", flush=True)
 
     # ── Verify server is reachable (automated ping gate) ─────────────────────
-    print(f"📡  Pinging server: {args.server}/health ...")
+    print(f"[DEBUG] Pinging server: {args.server}/health ...", flush=True)
     health = _call_server(args.server, "GET", "/health")
     status = health.get("status", "unknown")
     tasks_loaded = health.get("tasks_loaded", [])
-    print(f"    Status: {status} | Tasks loaded: {tasks_loaded}")
+    print(f"[DEBUG] Status: {status} | Tasks loaded: {tasks_loaded}", flush=True)
 
     if status != "ok":
-        print("❌ Server health check failed. Aborting.")
+        print("[DEBUG] Server health check failed. Aborting.", flush=True)
         sys.exit(1)
 
     # ── Build OpenAI client (spec: must use OpenAI client for all LLM calls) ─
@@ -377,7 +469,7 @@ def main():
     triage_scores: dict[str, float] = {}
     audit_scores: dict[str, float] = {}
 
-    print("🚀 Starting inference run ...\n")
+    print(f"[DEBUG] Starting inference run ...", flush=True)
     for task in tasks:
         t_score, a_score = evaluate_task(task, client, args.server)
         triage_scores[task] = t_score
@@ -387,16 +479,17 @@ def main():
     avg_triage = sum(triage_scores.values()) / len(triage_scores)
     avg_audit = sum(audit_scores.values()) / len(audit_scores)
 
-    print(f"\n{'='*56}")
-    print(f"  📊 PER-TASK SCORES:")
+    print(f"[DEBUG] {'='*56}", flush=True)
+    print(f"[DEBUG]   PER-TASK SCORES:", flush=True)
     for task in tasks:
-        t_bar = "█" * int(triage_scores[task] * 10)
-        a_bar = "█" * int(audit_scores[task] * 10)
-        print(f"     {task:8s}: triage={triage_scores[task]:.4f} {t_bar}  audit={audit_scores[task]:.4f} {a_bar}")
-    print(f"  {'─'*52}")
-    print(f"  🔍 AVG TRIAGE SCORE: {avg_triage:.4f}")
-    print(f"  🏁 AVG AUDIT SCORE:  {avg_audit:.4f}")
-    print(f"{'='*56}\n")
+        print(
+            f"[DEBUG]   {task:8s}: triage={triage_scores[task]:.4f}  audit={audit_scores[task]:.4f}",
+            flush=True,
+        )
+    print(f"[DEBUG]   {'─'*52}", flush=True)
+    print(f"[DEBUG]   AVG TRIAGE SCORE: {avg_triage:.4f}", flush=True)
+    print(f"[DEBUG]   AVG AUDIT SCORE:  {avg_audit:.4f}", flush=True)
+    print(f"[DEBUG] {'='*56}", flush=True)
 
     # Exit 0 = success (required by baseline-reproduces gate)
     sys.exit(0)

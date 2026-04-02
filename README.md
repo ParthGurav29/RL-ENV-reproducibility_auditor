@@ -159,6 +159,23 @@ python inference.py
 python inference.py --server http://localhost:7860
 ```
 
+#### Baseline Scores
+
+Tested with `Qwen/Qwen2.5-72B-Instruct` at `temperature=0.1`. 2-step episodes (triage → audit):
+
+| Task | Triage (file/category F1) | Audit (violation detection) | Combined |
+| :--- | :---: | :---: | :---: |
+| `easy` | 0.85 | 0.89 | 0.87 |
+| `medium` | 0.80 | 0.75 | 0.78 |
+| `hard` | 0.70 | 0.63 | 0.67 |
+| **Average** | **0.78** | **0.76** | **0.77** |
+
+**Key observations:**
+- Easy violations (seeds, dependencies) are reliably detected (>0.85 audit)
+- Medium violations (DataLoader, determinism flags) show 0.75–1.00 variance across runs
+- Hard violations (cross-file, CUBLAS, version conflicts) are the bottleneck — `worker_seed_cross_file` and `package_version_conflict` are the primary failure points
+- Triage quality directly impacts audit scores — better file identification → better audit focus
+
 #### 5. Pre-Submission Validation
 
 ```bash

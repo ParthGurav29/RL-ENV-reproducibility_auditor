@@ -81,7 +81,7 @@ Your response must exactly match this structure:
   "reasoning": "Brief explanation of why these files and categories are suspicious"
 }
 
-CRITICAL: Only flag files and categories that genuinely appear suspicious from the code. Do NOT list everything — precision matters as much as recall.
+CRITICAL: Check ALL files present in the observation (train.py, dataset.py, model.py, requirements.txt, config.yaml — whichever appear). Do NOT skip files because you are unsure — if a file is present and could plausibly contain violations, include it. Precision still matters, but missing an entire file costs more than a false positive on triage.
 """
 
 AUDIT_PROMPT = """You are an expert ML reproducibility auditor.

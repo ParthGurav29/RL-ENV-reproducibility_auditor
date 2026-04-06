@@ -215,14 +215,14 @@ def _call_server(server: str, method: str, path: str, payload: dict | None = Non
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.ConnectionError:
-        print(f"[DEBUG] Cannot connect to server at {server}.", flush=True)
-        print(f"[DEBUG] Start the server first: uvicorn server:app --host 0.0.0.0 --port 7860", flush=True)
+        print(f"[DEBUG] Cannot connect to server at {server}.", file=sys.stderr, flush=True)
+        print(f"[DEBUG] Start the server first: uvicorn server:app --host 0.0.0.0 --port 7860", file=sys.stderr, flush=True)
         sys.exit(1)
     except requests.exceptions.Timeout:
-        print(f"[DEBUG] Server request timed out ({REQUEST_TIMEOUT}s)", flush=True)
+        print(f"[DEBUG] Server request timed out ({REQUEST_TIMEOUT}s)", file=sys.stderr, flush=True)
         raise
     except requests.exceptions.HTTPError as e:
-        print(f"[DEBUG] Server error {e.response.status_code}: {e.response.text[:200]}", flush=True)
+        print(f"[DEBUG] Server error {e.response.status_code}: {e.response.text[:200]}", file=sys.stderr, flush=True)
         raise
 
 
@@ -241,7 +241,7 @@ def _call_llm_with_retry(client: OpenAI, messages: list, model: str) -> str:
         except Exception as e:
             last_error = e
             if attempt < LLM_MAX_RETRIES:
-                print(f"[DEBUG] LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}", flush=True)
+                print(f"[DEBUG] LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}", file=sys.stderr, flush=True)
                 time.sleep(LLM_RETRY_DELAY)
     raise last_error if last_error else RuntimeError("LLM call failed")
 
@@ -319,7 +319,7 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         observation = reset_data.get("observation", "")
         active = reset_data.get("info", {}).get("active_violations", [])
         max_steps = reset_data.get("info", {}).get("max_steps", 2)
-        print(f"[DEBUG] Task {task_name}: {len(active)} active violations, {max_steps} steps", flush=True)
+        print(f"[DEBUG] Task {task_name}: {len(active)} active violations, {max_steps} steps", file=sys.stderr, flush=True)
 
         # ── Step 1: Triage ────────────────────────────────────────────────────
         triage_error = None
@@ -331,11 +331,11 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
             triage_dict = _parse_llm_json(triage_str)
         except json.JSONDecodeError as e:
             triage_error = str(e)
-            print(f"[DEBUG] LLM returned invalid triage JSON: {e}", flush=True)
+            print(f"[DEBUG] LLM returned invalid triage JSON: {e}", file=sys.stderr, flush=True)
             triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": "Parse error"}
         except Exception as e:
             triage_error = str(e)
-            print(f"[DEBUG] LLM triage call failed: {e}", flush=True)
+            print(f"[DEBUG] LLM triage call failed: {e}", file=sys.stderr, flush=True)
             triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": str(e)}
 
         # Submit triage to server
@@ -354,11 +354,11 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         )
         log_step(step=1, action=triage_action_str, reward=triage_reward, done=False, error=triage_error)
 
-        print(f"[DEBUG] Triage reward: {triage_reward:.4f}", flush=True)
+        print(f"[DEBUG] Triage reward: {triage_reward:.4f}", file=sys.stderr, flush=True)
         if triage_feedback.get("files_confirmed"):
-            print(f"[DEBUG] Confirmed files: {', '.join(triage_feedback['files_confirmed'])}", flush=True)
+            print(f"[DEBUG] Confirmed files: {', '.join(triage_feedback['files_confirmed'])}", file=sys.stderr, flush=True)
         if triage_feedback.get("categories_confirmed"):
-            print(f"[DEBUG] Confirmed categories: {', '.join(triage_feedback['categories_confirmed'])}", flush=True)
+            print(f"[DEBUG] Confirmed categories: {', '.join(triage_feedback['categories_confirmed'])}", file=sys.stderr, flush=True)
 
         # ── Step 2: Full Audit ────────────────────────────────────────────────
         audit_error = None
@@ -370,11 +370,11 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
             audit_dict = _parse_llm_json(audit_str)
         except json.JSONDecodeError as e:
             audit_error = str(e)
-            print(f"[DEBUG] LLM returned invalid audit JSON: {e}", flush=True)
+            print(f"[DEBUG] LLM returned invalid audit JSON: {e}", file=sys.stderr, flush=True)
             audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": "Parse error"}
         except Exception as e:
             audit_error = str(e)
-            print(f"[DEBUG] LLM audit call failed: {e}", flush=True)
+            print(f"[DEBUG] LLM audit call failed: {e}", file=sys.stderr, flush=True)
             audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": str(e)}
 
         # Sanitize common LLM typos in violation keys
@@ -395,8 +395,8 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         breakdown = step_data.get("info", {}).get("score_breakdown", {})
         for check, passed in breakdown.items():
             icon = "✅" if passed else "❌"
-            print(f"[DEBUG]  {icon}  {check}", flush=True)
-        print(f"[DEBUG] Audit reward: {audit_reward:.4f}", flush=True)
+            print(f"[DEBUG]  {icon}  {check}", file=sys.stderr, flush=True)
+        print(f"[DEBUG] Audit reward: {audit_reward:.4f}", file=sys.stderr, flush=True)
 
         # Compute final score for this task
         score = sum(rewards_list) / len(rewards_list) if rewards_list else 0.0
@@ -404,7 +404,7 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as e:
-        print(f"[DEBUG] Task {task_name} failed with error: {e}", flush=True)
+        print(f"[DEBUG] Task {task_name} failed with error: {e}", file=sys.stderr, flush=True)
 
     finally:
         # ── [END] — always emitted, even on exception ────────────────────────
@@ -434,31 +434,31 @@ def main():
         missing.append("HF_TOKEN (or OPENAI_API_KEY)")
 
     if missing:
-        print("[DEBUG] ERROR: Missing required environment variables:", flush=True)
+        print("[DEBUG] ERROR: Missing required environment variables:", file=sys.stderr, flush=True)
         for var in missing:
-            print(f"[DEBUG]   export {var}='...'", flush=True)
-        print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", flush=True)
+            print(f"[DEBUG]   export {var}='...'", file=sys.stderr, flush=True)
+        print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", file=sys.stderr, flush=True)
         sys.exit(1)
 
-    print(f"[DEBUG] {'='*56}", flush=True)
-    print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", flush=True)
-    print(f"[DEBUG] {'='*56}", flush=True)
-    print(f"[DEBUG]   API_BASE_URL : {API_BASE_URL}", flush=True)
-    print(f"[DEBUG]   MODEL_NAME   : {MODEL_NAME}", flush=True)
-    print(f"[DEBUG]   HF_TOKEN     : {'set' if HF_TOKEN else 'not set'}", flush=True)
-    print(f"[DEBUG]   Server       : {args.server}", flush=True)
-    print(f"[DEBUG]   Episode mode : 2-step (triage → audit)", flush=True)
-    print(f"[DEBUG] {'='*56}", flush=True)
+    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", file=sys.stderr, flush=True)
+    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   API_BASE_URL : {API_BASE_URL}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   MODEL_NAME   : {MODEL_NAME}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   HF_TOKEN     : {'set' if HF_TOKEN else 'not set'}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   Server       : {args.server}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   Episode mode : 2-step (triage → audit)", file=sys.stderr, flush=True)
+    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
 
     # ── Verify server is reachable (automated ping gate) ─────────────────────
-    print(f"[DEBUG] Pinging server: {args.server}/health ...", flush=True)
+    print(f"[DEBUG] Pinging server: {args.server}/health ...", file=sys.stderr, flush=True)
     health = _call_server(args.server, "GET", "/health")
     status = health.get("status", "unknown")
     tasks_loaded = health.get("tasks_loaded", [])
-    print(f"[DEBUG] Status: {status} | Tasks loaded: {tasks_loaded}", flush=True)
+    print(f"[DEBUG] Status: {status} | Tasks loaded: {tasks_loaded}", file=sys.stderr, flush=True)
 
     if status != "ok":
-        print("[DEBUG] Server health check failed. Aborting.", flush=True)
+        print("[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True)
         sys.exit(1)
 
     # ── Build OpenAI client (spec: must use OpenAI client for all LLM calls) ─
@@ -469,7 +469,7 @@ def main():
     triage_scores: dict[str, float] = {}
     audit_scores: dict[str, float] = {}
 
-    print(f"[DEBUG] Starting inference run ...", flush=True)
+    print(f"[DEBUG] Starting inference run ...", file=sys.stderr, flush=True)
     for task in tasks:
         t_score, a_score = evaluate_task(task, client, args.server)
         triage_scores[task] = t_score
@@ -479,17 +479,17 @@ def main():
     avg_triage = sum(triage_scores.values()) / len(triage_scores)
     avg_audit = sum(audit_scores.values()) / len(audit_scores)
 
-    print(f"[DEBUG] {'='*56}", flush=True)
-    print(f"[DEBUG]   PER-TASK SCORES:", flush=True)
+    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   PER-TASK SCORES:", file=sys.stderr, flush=True)
     for task in tasks:
         print(
             f"[DEBUG]   {task:8s}: triage={triage_scores[task]:.4f}  audit={audit_scores[task]:.4f}",
-            flush=True,
+            file=sys.stderr, flush=True,
         )
-    print(f"[DEBUG]   {'─'*52}", flush=True)
-    print(f"[DEBUG]   AVG TRIAGE SCORE: {avg_triage:.4f}", flush=True)
-    print(f"[DEBUG]   AVG AUDIT SCORE:  {avg_audit:.4f}", flush=True)
-    print(f"[DEBUG] {'='*56}", flush=True)
+    print(f"[DEBUG]   {'─'*52}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   AVG TRIAGE SCORE: {avg_triage:.4f}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   AVG AUDIT SCORE:  {avg_audit:.4f}", file=sys.stderr, flush=True)
+    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
 
     # Exit 0 = success (required by baseline-reproduces gate)
     sys.exit(0)

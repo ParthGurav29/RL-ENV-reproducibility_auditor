@@ -22,17 +22,17 @@ from env.base_env import ReproducibilityAuditorEnv, ALL_CATEGORIES
 class TriageAction(BaseModel):
     """Step 1 action — agent identifies suspicious files and violation categories."""
     suspicious_files: list[str] = Field(
-        ...,
+        default_factory=list,
         description="File names the agent suspects contain reproducibility violations",
         min_length=0,
     )
     suspected_categories: list[str] = Field(
-        ...,
+        default_factory=list,
         description=f"Violation categories the agent suspects are present. Valid categories: {', '.join(ALL_CATEGORIES)}",
         min_length=0,
     )
     reasoning: str = Field(
-        ...,
+        default="",
         description="Brief explanation of why these files/categories are suspicious",
     )
 
@@ -46,18 +46,18 @@ class ViolationObject(BaseModel):
 class AuditAction(BaseModel):
     """Step 2 action — the structured audit report an agent must submit."""
     violations: list[ViolationObject] = Field(
-        ...,
+        default_factory=list,
         description="List of reproducibility violations found in the experiment",
         min_length=0,
     )
     reproducibility_score: float = Field(
-        ...,
+        default=0.0,
         ge=0.0,
         le=1.0,
         description="Agent's self-assessed reproducibility score (0=broken, 1=perfect)",
     )
     explanation: str = Field(
-        ...,
+        default="",
         description="Human-readable summary of findings",
     )
 
@@ -145,15 +145,43 @@ class ReproducibilityEnvOpenEnv:
         return ResetResult(observation=obs, info=info)
 
     def step(self, action: str | dict | TriageAction | AuditAction) -> StepResult:
+        import concurrent.futures
+        
         # Auto-detect action type from dict keys (robust — no reliance on step count)
         is_triage = self._detect_triage(action)
 
-        if is_triage:
-            action_json = self._coerce_triage(action)
-        else:
-            action_json = self._coerce_action(action)
+        try:
+            if is_triage:
+                action_json = self._coerce_triage(action)
+            else:
+                action_json = self._coerce_action(action)
+        except Exception as e:
+            # Fallback: if action validation fails, use safe defaults
+            if is_triage:
+                action_json = TriageAction().model_dump_json()
+            else:
+                action_json = AuditAction().model_dump_json()
 
-        obs, reward, terminated, truncated, info = self._inner.step(action_json)
+        # Execute step with 10 second timeout to prevent hanging
+        try:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self._inner.step, action_json)
+                obs, reward, terminated, truncated, info = future.result(timeout=10)
+        except concurrent.futures.TimeoutError:
+            # Step timed out - return safe failure result
+            obs = "Step execution timed out after 10 seconds."
+            reward = 0.0
+            terminated = True
+            truncated = True
+            info = {"error": "Step timed out", "score_breakdown": {}}
+        except Exception as e:
+            # Any other error - return safe failure result
+            obs = f"Step failed with error: {str(e)}"
+            reward = 0.0
+            terminated = True
+            truncated = True
+            info = {"error": str(e), "score_breakdown": {}}
+
         self._step_count     += 1
         self._last_reward     = reward
 
@@ -167,7 +195,7 @@ class ReproducibilityEnvOpenEnv:
             self._is_active = False
 
         return StepResult(
-            observation=obs,
+            observation=str(obs) if obs is not None else "",
             reward=reward,
             terminated=terminated,
             truncated=truncated,
@@ -256,35 +284,47 @@ class ReproducibilityEnvOpenEnv:
         return False
 
     @staticmethod
-    def _coerce_triage(action: str | dict | TriageAction) -> str:
+    def _coerce_triage(action: str | dict | TriageAction | AuditAction) -> str:
         """Accept string, dict, or Pydantic model — return validated JSON string for triage."""
         if isinstance(action, TriageAction):
             return action.model_dump_json()
+        if isinstance(action, AuditAction):
+            # Convert AuditAction to TriageAction safely
+            return TriageAction().model_dump_json()
         if isinstance(action, dict):
-            validated = TriageAction(**action)
-            return validated.model_dump_json()
+            try:
+                validated = TriageAction(**action)
+                return validated.model_dump_json()
+            except:
+                return TriageAction().model_dump_json()
         if isinstance(action, str):
             try:
                 parsed = json.loads(action)
                 validated = TriageAction(**parsed)
                 return validated.model_dump_json()
-            except Exception as e:
-                raise ValueError(f"Invalid triage action JSON: {e}") from e
-        raise TypeError(f"Unsupported triage action type: {type(action)}")
+            except:
+                return TriageAction().model_dump_json()
+        return TriageAction().model_dump_json()
 
     @staticmethod
-    def _coerce_action(action: str | dict | AuditAction) -> str:
+    def _coerce_action(action: str | dict | TriageAction | AuditAction) -> str:
         """Accept string, dict, or Pydantic model — always return validated JSON string."""
         if isinstance(action, AuditAction):
             return action.model_dump_json()
+        if isinstance(action, TriageAction):
+            # Convert TriageAction to AuditAction safely
+            return AuditAction().model_dump_json()
         if isinstance(action, dict):
-            validated = AuditAction(**action)
-            return validated.model_dump_json()
+            try:
+                validated = AuditAction(**action)
+                return validated.model_dump_json()
+            except:
+                return AuditAction().model_dump_json()
         if isinstance(action, str):
             try:
                 parsed = json.loads(action)
                 validated = AuditAction(**parsed)
                 return validated.model_dump_json()
-            except Exception as e:
-                raise ValueError(f"Invalid action JSON: {e}") from e
-        raise TypeError(f"Unsupported action type: {type(action)}")
+            except:
+                return AuditAction().model_dump_json()
+        return AuditAction().model_dump_json()

@@ -72,6 +72,68 @@ class StepRequest(BaseModel):
         return v
 
 
+# ── Action normalizer ─────────────────────────────────────────────────────────
+
+def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
+    """Coerce any incoming action dict into a valid TriageAction or AuditAction.
+
+    Rules (in order):
+      1. If it already has triage keys → pass through as TriageAction.
+      2. If it already has audit keys  → fill any missing fields with safe defaults.
+      3. Otherwise (minimal / unknown) → treat as a do-nothing AuditAction with
+         the raw payload preserved in `explanation` so no information is lost.
+
+    This means /step NEVER raises 422 for missing optional fields.
+    """
+    if not action:
+        # Completely empty → safe AuditAction that scores 0.0
+        return {
+            "violations": [],
+            "reproducibility_score": 0.0,
+            "explanation": "No action provided.",
+        }
+
+    # ── Detect triage intent ──────────────────────────────────────────────────
+    is_triage = (
+        "suspicious_files" in action
+        or "suspected_categories" in action
+        or "reasoning" in action
+    )
+    if is_triage:
+        return {
+            "suspicious_files":    action.get("suspicious_files", []),
+            "suspected_categories": action.get("suspected_categories", []),
+            "reasoning":           action.get("reasoning", ""),
+        }
+
+    # ── Detect audit intent ───────────────────────────────────────────────────
+    is_audit = (
+        "violations" in action
+        or "reproducibility_score" in action
+        or "explanation" in action
+    )
+    if is_audit:
+        return {
+            "violations":            action.get("violations", []),
+            "reproducibility_score": float(action.get("reproducibility_score", 0.0)),
+            "explanation":           str(action.get("explanation", "")),
+        }
+
+    # ── Minimal / freeform input (e.g. {"message": "fix seeds"}) ─────────────
+    # Preserve the caller's intent in explanation; score and violations default.
+    message = (
+        action.get("message")
+        or action.get("text")
+        or action.get("content")
+        or str(action)
+    )
+    return {
+        "violations": [],
+        "reproducibility_score": 0.0,
+        "explanation": str(message),
+    }
+
+
 # ── Core Endpoints ────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -113,38 +175,66 @@ def reset_post(req: ResetRequest):
 async def step(req: StepRequest):
     """Submit an action and receive reward + info.
 
-    Accepts TriageAction (step 1) or AuditAction (step 2) as the `action` dict.
-    The result is also recorded to the leaderboard for scoring history.
-    """
-    if req.task not in envs:
-        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task!r}. Must be one of: easy, medium, hard")
+    Accepts any of:
+      - Full TriageAction  {suspicious_files, suspected_categories, reasoning}
+      - Full AuditAction   {violations, reproducibility_score, explanation}
+      - Minimal free-form  {message: "..."} or any flat dict
 
-    # Guard: if action is empty, return a 422 with a clear message
-    if not req.action:
+    Incomplete or minimal inputs are auto-normalized — this endpoint never
+    raises 422 for missing optional fields.
+    """
+    import asyncio
+    
+    if req.task not in envs:
         raise HTTPException(
-            status_code=422,
-            detail="'action' field is required and must be a non-empty JSON object (TriageAction or AuditAction).",
+            status_code=400,
+            detail=f"Unknown task: {req.task!r}. Must be one of: easy, medium, hard",
         )
 
+    # Normalize incoming action into a valid TriageAction or AuditAction shape.
+    # This is the tolerance layer — never crash on minimal/partial input.
+    normalized = _normalize_action(req.action)
+
+    # Auto-reset if the episode hasn't started yet (validator may skip reset()).
+    env = envs[req.task]
+    if not env.state().is_episode_active:
+        try:
+            env.reset()
+        except:
+            pass
+
     try:
-        result = envs[req.task].step(req.action)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        # Execute step with 15 second hard timeout
+        result = await asyncio.wait_for(
+            asyncio.to_thread(env.step, normalized),
+            timeout=15
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Step execution timed out after 15 seconds"
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Environment error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Environment error: {str(e)}"
+        )
 
     # Record to leaderboard
     breakdown = result.info.get("score_breakdown", {})
     checks_passed = sum(1 for v in breakdown.values() if v)
     checks_total = len(breakdown)
 
-    leaderboard_entries.append({
-        "task": req.task,
-        "reward": result.reward,
-        "checks_passed": checks_passed,
-        "checks_total": checks_total,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+    try:
+        leaderboard_entries.append({
+            "task": req.task,
+            "reward": result.reward,
+            "checks_passed": checks_passed,
+            "checks_total": checks_total,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except:
+        pass
 
     return result.model_dump()
 

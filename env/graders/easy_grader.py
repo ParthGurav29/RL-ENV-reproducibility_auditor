@@ -126,7 +126,8 @@ class EasyGrader:
         false_positives = sum(1 for k in ALL_EASY_CHECKS if k not in active_violations and all_detections[k])
 
         raw = hits - 1.0 * false_positives
-        reward = round(max(0.0, min(1.0, raw / len(active_violations))), 4)
+        n = max(1, len(active_violations))  # guard against empty set (step before reset)
+        reward = round(max(0.0, min(1.0, raw / n)), 4)
         return reward, breakdown
 
     def _check_detection(self, claim_entries, all_detections, violation_id, keywords):

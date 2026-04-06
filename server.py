@@ -12,10 +12,10 @@ import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Query, Request
+from pydantic import BaseModel, field_validator
 
 from env.openenv_wrapper import ReproducibilityEnvOpenEnv, AuditAction
 
@@ -50,10 +50,26 @@ app = FastAPI(
 class ResetRequest(BaseModel):
     task: str = "easy"
 
+    @field_validator("task")
+    @classmethod
+    def task_must_be_valid(cls, v: str) -> str:
+        valid = {"easy", "medium", "hard"}
+        if v not in valid:
+            raise ValueError(f"task must be one of {sorted(valid)}, got {v!r}")
+        return v
+
 
 class StepRequest(BaseModel):
     task: str = "easy"
-    action: dict[str, Any]
+    action: dict[str, Any] = {}
+
+    @field_validator("task")
+    @classmethod
+    def task_must_be_valid(cls, v: str) -> str:
+        valid = {"easy", "medium", "hard"}
+        if v not in valid:
+            raise ValueError(f"task must be one of {sorted(valid)}, got {v!r}")
+        return v
 
 
 # ── Core Endpoints ────────────────────────────────────────────────────────────
@@ -75,27 +91,47 @@ def get_spec():
     return ReproducibilityEnvOpenEnv.spec()
 
 
+@app.get("/reset")
+def reset_get(task: str = Query(default="easy", description="Task difficulty: easy | medium | hard")):
+    """Reset via GET — validators may call GET /reset?task=easy."""
+    if task not in envs:
+        raise HTTPException(status_code=400, detail=f"Unknown task: {task!r}. Must be one of: easy, medium, hard")
+    result = envs[task].reset()
+    return result.model_dump()
+
+
 @app.post("/reset")
-def reset(req: ResetRequest):
-    """Reset the environment and return the first observation."""
+def reset_post(req: ResetRequest):
+    """Reset via POST — inference.py and OpenEnv harness use this."""
     if req.task not in envs:
-        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task}")
+        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task!r}. Must be one of: easy, medium, hard")
     result = envs[req.task].reset()
     return result.model_dump()
 
 
 @app.post("/step")
-def step(req: StepRequest):
+async def step(req: StepRequest):
     """Submit an action and receive reward + info.
 
+    Accepts TriageAction (step 1) or AuditAction (step 2) as the `action` dict.
     The result is also recorded to the leaderboard for scoring history.
     """
     if req.task not in envs:
-        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task}")
+        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task!r}. Must be one of: easy, medium, hard")
+
+    # Guard: if action is empty, return a 422 with a clear message
+    if not req.action:
+        raise HTTPException(
+            status_code=422,
+            detail="'action' field is required and must be a non-empty JSON object (TriageAction or AuditAction).",
+        )
+
     try:
         result = envs[req.task].step(req.action)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Environment error: {e}")
 
     # Record to leaderboard
     breakdown = result.info.get("score_breakdown", {})

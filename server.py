@@ -40,6 +40,8 @@ app = FastAPI(
     title="ML Reproducibility Auditor — OpenEnv",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/docs",      # 👈 force enable
+    redoc_url="/redoc"     # 👈 optional
 )
 
 

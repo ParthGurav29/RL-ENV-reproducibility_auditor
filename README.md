@@ -6,7 +6,7 @@ colorTo: indigo
 sdk: docker
 app_port: 7860
 license: apache-2.0
-short_description: "OpenEnv RL environment: audit ML experiments for reproducibility violations"
+short_description: ML reproducibility auditor RL environment
 tags:
   - openenv
   - reinforcement-learning

@@ -1,9 +1,9 @@
 """
 server/app.py - Server module for OpenEnv deployment.
-This contains the actual FastAPI app and main() entry point.
+This contains the main() entry point.
 """
 import uvicorn
-from server import app
+from server_api import app
 
 
 def main():

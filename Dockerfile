@@ -13,7 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Application code ──────────────────────────────────────────────────────────
 COPY env/          ./env/
-COPY server.py     .
+COPY server/       ./server/
+COPY server_api.py .
 COPY app.py        .
 COPY inference.py  .
 COPY openenv.yaml  .

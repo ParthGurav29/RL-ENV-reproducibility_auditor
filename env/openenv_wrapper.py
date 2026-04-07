@@ -142,7 +142,8 @@ class ReproducibilityEnvOpenEnv:
         self._active_violations = info.get("active_violations", [])
         self._is_active      = True
         self._triage_completed = False
-        return ResetResult(observation=obs, info=info)
+        clean_info = {k: v for k, v in info.items() if k not in ("active_violations", "num_active_violations")}
+        return ResetResult(observation=obs, info=clean_info)
 
     def step(self, action: str | dict | TriageAction | AuditAction) -> StepResult:
         import concurrent.futures

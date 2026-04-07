@@ -66,7 +66,8 @@ if not _base.endswith("/v1"):
 API_BASE_URL_NORMALIZED = _base + "/"
 
 # ── Server config ─────────────────────────────────────────────────────────────
-DEFAULT_SERVER  = os.environ.get("SERVER_URL", "http://localhost:7860")
+
+DEFAULT_SERVER = os.environ.get("SERVER_URL", "https://prime23457890-reproducibility-auditor.hf.space")
 REQUEST_TIMEOUT = 30   # seconds per HTTP call
 LLM_TIMEOUT     = 60   # seconds per LLM call
 LLM_MAX_RETRIES = 3    # retry LLM calls on failure

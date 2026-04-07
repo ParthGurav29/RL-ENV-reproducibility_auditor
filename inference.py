@@ -95,11 +95,11 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     )
 
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, rewards: List[float]) -> None:
     """Emit [END] line at episode end — always emitted, even on exception."""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
         flush=True,
     )
 
@@ -409,7 +409,7 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
 
     finally:
         # ── [END] — always emitted, even on exception ────────────────────────
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards_list)
+        log_end(success=success, steps=steps_taken, rewards=rewards_list)
 
     return triage_reward, audit_reward
 

@@ -163,11 +163,12 @@ def reset_get(task: str = Query(default="easy", description="Task difficulty: ea
 
 
 @app.post("/reset")
-def reset_post(req: ResetRequest):
+def reset_post(req: Optional[ResetRequest] = None):
     """Reset via POST — inference.py and OpenEnv harness use this."""
-    if req.task not in envs:
-        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task!r}. Must be one of: easy, medium, hard")
-    result = envs[req.task].reset()
+    task = req.task if req and req.task else "easy"
+    if task not in envs:
+        raise HTTPException(status_code=400, detail=f"Unknown task: {task!r}. Must be one of: easy, medium, hard")
+    result = envs[task].reset()
     return result.model_dump()
 
 

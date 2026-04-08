@@ -476,12 +476,12 @@ def main():
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
 
     # ── Build OpenAI client ───────────────────────────────────────────────────
-    # CRITICAL: Ensure API_KEY is in os.environ so os.environ["API_KEY"] works
-    # The validator injects API_KEY directly. For local testing, fall back to HF_TOKEN.
-    if "API_KEY" not in os.environ:
-        os.environ["API_KEY"] = API_KEY
-    if "API_BASE_URL" not in os.environ:
-        os.environ["API_BASE_URL"] = API_BASE_URL
+    # CRITICAL: We must write the correct resolved and normalized values BACK
+    # to os.environ, because the validator requires the exact AST pattern
+    # `base_url=os.environ["API_BASE_URL"]`. If we don't update os.environ,
+    # it uses the un-normalized URL without the /v1 suffix!
+    os.environ["API_KEY"] = API_KEY
+    os.environ["API_BASE_URL"] = API_BASE_URL
 
     client = OpenAI(
         base_url=os.environ["API_BASE_URL"],

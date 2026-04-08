@@ -45,10 +45,12 @@ import argparse
 import requests
 from typing import Optional, List
 from openai import OpenAI
+
 # Try to load .env for local development only
 # In validator/production, env vars are injected directly
 try:
     from dotenv import load_dotenv
+
     load_dotenv(override=False)
 except ImportError:
     pass
@@ -56,23 +58,25 @@ except ImportError:
 # ── Module-level defaults (safe reads, no crashes) ───────────────────────────
 # NOTE: These are ONLY defaults. main() re-reads from os.environ to pick up
 # validator-injected values that may arrive after module load.
-API_BASE_URL   = ""
-MODEL_NAME     = "Qwen/Qwen2.5-72B-Instruct"
-HF_TOKEN       = None
+API_BASE_URL = ""
+MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
+HF_TOKEN = None
 OPENAI_API_KEY = None
-API_KEY        = None
+API_KEY = None
 
 # ── Server config ─────────────────────────────────────────────────────────────
 
-DEFAULT_SERVER = os.environ.get("SERVER_URL", "https://prime23457890-reproducibility-auditor.hf.space")
-REQUEST_TIMEOUT = 120   # seconds per HTTP call
-LLM_TIMEOUT     = 60   # seconds per LLM call
-LLM_MAX_RETRIES = 3    # retry LLM calls on failure
-LLM_RETRY_DELAY = 2    # seconds between retries
+DEFAULT_SERVER = os.environ.get(
+    "SERVER_URL", "https://prime23457890-reproducibility-auditor.hf.space"
+)
+REQUEST_TIMEOUT = 120  # seconds per HTTP call
+LLM_TIMEOUT = 60  # seconds per LLM call
+LLM_MAX_RETRIES = 3  # retry LLM calls on failure
+LLM_RETRY_DELAY = 2  # seconds between retries
 
 # ── OpenEnv metadata ─────────────────────────────────────────────────────────
 BENCHMARK = "reproducibility-auditor-v1"
-SUCCESS_SCORE_THRESHOLD = 0.1   # normalized score in [0, 1]
+SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 
 # ── Structured stdout log helpers (MANDATORY FORMAT) ─────────────────────────
 
@@ -87,13 +91,17 @@ def _sanitize_error(error: Optional[str]) -> str:
     Remove newlines, curly braces, and truncate to 120 chars."""
     if not error:
         return "null"
-    clean = error.replace("\n", " ").replace("{", "(").replace("}", ")").replace("'", "")
+    clean = (
+        error.replace("\n", " ").replace("{", "(").replace("}", ")").replace("'", "")
+    )
     if len(clean) > 120:
         clean = clean[:117] + "..."
     return clean
 
 
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+def log_step(
+    step: int, action: str, reward: float, done: bool, error: Optional[str]
+) -> None:
     """Emit [STEP] line immediately after env.step() returns."""
     error_val = error if error else "null"
     done_val = str(done).lower()
@@ -213,7 +221,9 @@ PHRASING HINTS — these phrases MUST appear in your violation_type to be detect
 """
 
 
-def _call_server(server: str, method: str, path: str, payload: dict | None = None) -> dict:
+def _call_server(
+    server: str, method: str, path: str, payload: dict | None = None
+) -> dict:
     """Make a request to the OpenEnv server."""
     url = f"{server.rstrip('/')}{path}"
     try:
@@ -224,14 +234,30 @@ def _call_server(server: str, method: str, path: str, payload: dict | None = Non
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.ConnectionError:
-        print(f"[DEBUG] Cannot connect to server at {server}.", file=sys.stderr, flush=True)
-        print(f"[DEBUG] Start the server first: uvicorn server:app --host 0.0.0.0 --port 7860", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Cannot connect to server at {server}.",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(
+            f"[DEBUG] Start the server first: uvicorn server:app --host 0.0.0.0 --port 7860",
+            file=sys.stderr,
+            flush=True,
+        )
         raise
     except requests.exceptions.Timeout:
-        print(f"[DEBUG] Server request timed out ({REQUEST_TIMEOUT}s)", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Server request timed out ({REQUEST_TIMEOUT}s)",
+            file=sys.stderr,
+            flush=True,
+        )
         raise
     except requests.exceptions.HTTPError as e:
-        print(f"[DEBUG] Server error {e.response.status_code}: {e.response.text[:200]}", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Server error {e.response.status_code}: {e.response.text[:200]}",
+            file=sys.stderr,
+            flush=True,
+        )
         raise
 
 
@@ -246,11 +272,16 @@ def _call_llm_with_retry(client: OpenAI, messages: list, model: str) -> str:
                 temperature=0.1,
                 timeout=LLM_TIMEOUT,
             )
-            return resp.choices[0].message.content.strip()
+            content = resp.choices[0].message.content
+            return content.strip() if content else ""
         except Exception as e:
             last_error = e
             if attempt < LLM_MAX_RETRIES:
-                print(f"[DEBUG] LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}", file=sys.stderr, flush=True)
+                print(
+                    f"[DEBUG] LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 time.sleep(LLM_RETRY_DELAY)
     raise last_error if last_error else RuntimeError("LLM call failed")
 
@@ -328,27 +359,49 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         observation = reset_data.get("observation", "")
         active = reset_data.get("info", {}).get("active_violations", [])
         max_steps = reset_data.get("info", {}).get("max_steps", 2)
-        print(f"[DEBUG] Task {task_name}: {len(active)} active violations, {max_steps} steps", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Task {task_name}: {len(active)} active violations, {max_steps} steps",
+            file=sys.stderr,
+            flush=True,
+        )
 
         # ── Step 1: Triage ────────────────────────────────────────────────────
         triage_error = None
         try:
-            triage_str = _call_llm_with_retry(client, [
-                {"role": "system", "content": TRIAGE_PROMPT},
-                {"role": "user",   "content": observation},
-            ], MODEL_NAME)
+            triage_str = _call_llm_with_retry(
+                client,
+                [
+                    {"role": "system", "content": TRIAGE_PROMPT},
+                    {"role": "user", "content": observation},
+                ],
+                MODEL_NAME,
+            )
             triage_dict = _parse_llm_json(triage_str)
         except json.JSONDecodeError as e:
             triage_error = str(e)
-            print(f"[DEBUG] LLM returned invalid triage JSON: {e}", file=sys.stderr, flush=True)
-            triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": "Parse error"}
+            print(
+                f"[DEBUG] LLM returned invalid triage JSON: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            triage_dict = {
+                "suspicious_files": [],
+                "suspected_categories": [],
+                "reasoning": "Parse error",
+            }
         except Exception as e:
             triage_error = str(e)
             print(f"[DEBUG] LLM triage call failed: {e}", file=sys.stderr, flush=True)
-            triage_dict = {"suspicious_files": [], "suspected_categories": [], "reasoning": str(e)}
+            triage_dict = {
+                "suspicious_files": [],
+                "suspected_categories": [],
+                "reasoning": str(e),
+            }
 
         # Submit triage to server
-        triage_result = _call_server(server, "POST", "/step", {"task": task_name, "action": triage_dict})
+        triage_result = _call_server(
+            server, "POST", "/step", {"task": task_name, "action": triage_dict}
+        )
         triage_reward = triage_result.get("reward", 0.0)
         triage_feedback = triage_result.get("info", {}).get("triage_feedback", {})
         enhanced_obs = triage_result.get("observation", observation)
@@ -361,36 +414,70 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
             f"triage(files={len(triage_dict.get('suspicious_files', []))},"
             f"categories={len(triage_dict.get('suspected_categories', []))})"
         )
-        log_step(step=1, action=triage_action_str, reward=triage_reward, done=False, error=triage_error)
+        log_step(
+            step=1,
+            action=triage_action_str,
+            reward=triage_reward,
+            done=False,
+            error=triage_error,
+        )
 
-        print(f"[DEBUG] Triage reward: {triage_reward:.4f}", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Triage reward: {triage_reward:.4f}", file=sys.stderr, flush=True
+        )
         if triage_feedback.get("files_confirmed"):
-            print(f"[DEBUG] Confirmed files: {', '.join(triage_feedback['files_confirmed'])}", file=sys.stderr, flush=True)
+            print(
+                f"[DEBUG] Confirmed files: {', '.join(triage_feedback['files_confirmed'])}",
+                file=sys.stderr,
+                flush=True,
+            )
         if triage_feedback.get("categories_confirmed"):
-            print(f"[DEBUG] Confirmed categories: {', '.join(triage_feedback['categories_confirmed'])}", file=sys.stderr, flush=True)
+            print(
+                f"[DEBUG] Confirmed categories: {', '.join(triage_feedback['categories_confirmed'])}",
+                file=sys.stderr,
+                flush=True,
+            )
 
         # ── Step 2: Full Audit ────────────────────────────────────────────────
         audit_error = None
         try:
-            audit_str = _call_llm_with_retry(client, [
-                {"role": "system", "content": AUDIT_PROMPT},
-                {"role": "user",   "content": enhanced_obs},
-            ], MODEL_NAME)
+            audit_str = _call_llm_with_retry(
+                client,
+                [
+                    {"role": "system", "content": AUDIT_PROMPT},
+                    {"role": "user", "content": enhanced_obs},
+                ],
+                MODEL_NAME,
+            )
             audit_dict = _parse_llm_json(audit_str)
         except json.JSONDecodeError as e:
             audit_error = str(e)
-            print(f"[DEBUG] LLM returned invalid audit JSON: {e}", file=sys.stderr, flush=True)
-            audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": "Parse error"}
+            print(
+                f"[DEBUG] LLM returned invalid audit JSON: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            audit_dict = {
+                "violations": [],
+                "reproducibility_score": 0.0,
+                "explanation": "Parse error",
+            }
         except Exception as e:
             audit_error = str(e)
             print(f"[DEBUG] LLM audit call failed: {e}", file=sys.stderr, flush=True)
-            audit_dict = {"violations": [], "reproducibility_score": 0.0, "explanation": str(e)}
+            audit_dict = {
+                "violations": [],
+                "reproducibility_score": 0.0,
+                "explanation": str(e),
+            }
 
         # Sanitize common LLM typos in violation keys
         audit_dict = _sanitize_audit_dict(audit_dict)
 
         # Submit audit to server
-        step_data = _call_server(server, "POST", "/step", {"task": task_name, "action": audit_dict})
+        step_data = _call_server(
+            server, "POST", "/step", {"task": task_name, "action": audit_dict}
+        )
         audit_reward = step_data.get("reward", 0.0)
 
         rewards_list.append(audit_reward)
@@ -398,7 +485,13 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
 
         # ── [STEP] — audit result ─────────────────────────────────────────────
         audit_action_str = f"audit(violations={len(audit_dict.get('violations', []))})"
-        log_step(step=2, action=audit_action_str, reward=audit_reward, done=True, error=audit_error)
+        log_step(
+            step=2,
+            action=audit_action_str,
+            reward=audit_reward,
+            done=True,
+            error=audit_error,
+        )
 
         # Debug: print score breakdown
         breakdown = step_data.get("info", {}).get("score_breakdown", {})
@@ -413,7 +506,11 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as e:
-        print(f"[DEBUG] Task {task_name} failed with error: {e}", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Task {task_name} failed with error: {e}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     finally:
         # ── [END] — always emitted, even on exception ────────────────────────
@@ -434,31 +531,62 @@ def main():
     args = parser.parse_args()
 
     # ── Read env vars STRICTLY from os.environ (validator injects these) ──────
-    # Any fallbacks or modifications here will break the validator's strict 
-    # API key proxy tracking! We must use exactly what they provide.
-    API_BASE_URL = os.environ["API_BASE_URL"]
-    API_KEY = os.environ["API_KEY"]
+    # Try multiple possible env var names to find the API key
+    API_BASE_URL = os.environ.get("API_BASE_URL", "")
+    API_KEY = (
+        os.environ.get("API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("HF_TOKEN", "")
+    )
     MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
+    if not API_BASE_URL or not API_KEY:
+        print(
+            "[DEBUG] ERROR: Missing API_BASE_URL or API_KEY environment variables",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(
+            f"[DEBUG] API_BASE_URL set: {bool(API_BASE_URL)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(f"[DEBUG] API_KEY set: {bool(API_KEY)}", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Available env vars: {[k for k in os.environ.keys() if 'API' in k or 'HF' in k or 'MODEL' in k]}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        sys.exit(0)
+
     # ── Debug: show exactly which env vars are being used ─────────────────────
-    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
-    print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", file=sys.stderr, flush=True)
-    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
+    print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
+    print(
+        f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline",
+        file=sys.stderr,
+        flush=True,
+    )
+    print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   API_BASE_URL : {API_BASE_URL}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   MODEL_NAME   : {MODEL_NAME}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   API_KEY      : {API_KEY[:8]}...", file=sys.stderr, flush=True)
     print(f"[DEBUG]   Server       : {args.server}", file=sys.stderr, flush=True)
-    print(f"[DEBUG]   Episode mode : 2-step (triage → audit)", file=sys.stderr, flush=True)
-    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
+    print(
+        f"[DEBUG]   Episode mode : 2-step (triage → audit)", file=sys.stderr, flush=True
+    )
+    print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
 
     # ── Build OpenAI client ───────────────────────────────────────────────────
     # STRICT COMPLIANCE: Must initialize directly from os.environ dictionary
-    client = OpenAI(
-        base_url=os.environ["API_BASE_URL"],
-        api_key=os.environ["API_KEY"]
-    )
+    client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
     print(f"[DEBUG] Client base_url: {client.base_url}", file=sys.stderr, flush=True)
-    print(f"[DEBUG] Client api_key:  {client.api_key[:8] if client.api_key else 'EMPTY'}...", file=sys.stderr, flush=True)
+    print(
+        f"[DEBUG] Client api_key:  {client.api_key[:8] if client.api_key else 'EMPTY'}...",
+        file=sys.stderr,
+        flush=True,
+    )
 
     # 🔥 CRITICAL PING: Ensure we make at least ONE request so the proxy counts it
     try:
@@ -466,19 +594,33 @@ def main():
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": "ping"}],
-            max_tokens=5
+            max_tokens=5,
         )
-        print(f"[DEBUG] Pre-flight success: {response.choices[0].message.content}", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Pre-flight success: {response.choices[0].message.content}",
+            file=sys.stderr,
+            flush=True,
+        )
     except Exception as e:
-        print(f"[DEBUG] Pre-flight failed (expected locally): {e}", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Pre-flight failed (expected locally): {e}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     # ── Verify server is reachable (automated ping gate) ─────────────────────
-    print(f"[DEBUG] Pinging server: {args.server}/health ...", file=sys.stderr, flush=True)
+    print(
+        f"[DEBUG] Pinging server: {args.server}/health ...", file=sys.stderr, flush=True
+    )
     try:
         health = _call_server(args.server, "GET", "/health")
         status = health.get("status", "unknown")
         tasks_loaded = health.get("tasks_loaded", [])
-        print(f"[DEBUG] Status: {status} | Tasks loaded: {tasks_loaded}", file=sys.stderr, flush=True)
+        print(
+            f"[DEBUG] Status: {status} | Tasks loaded: {tasks_loaded}",
+            file=sys.stderr,
+            flush=True,
+        )
     except Exception as e:
         print(f"[DEBUG] Server health check error: {e}", file=sys.stderr, flush=True)
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
@@ -486,7 +628,9 @@ def main():
         sys.exit(0)
 
     if status != "ok":
-        print("[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True)
+        print(
+            "[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True
+        )
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
         print("[END] success=false steps=0 rewards=", flush=True)
         sys.exit(0)
@@ -508,17 +652,18 @@ def main():
     avg_triage = sum(triage_scores.values()) / len(triage_scores)
     avg_audit = sum(audit_scores.values()) / len(audit_scores)
 
-    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
+    print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   PER-TASK SCORES:", file=sys.stderr, flush=True)
     for task in tasks:
         print(
             f"[DEBUG]   {task:8s}: triage={triage_scores[task]:.4f}  audit={audit_scores[task]:.4f}",
-            file=sys.stderr, flush=True,
+            file=sys.stderr,
+            flush=True,
         )
-    print(f"[DEBUG]   {'─'*52}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   {'─' * 52}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   AVG TRIAGE SCORE: {avg_triage:.4f}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   AVG AUDIT SCORE:  {avg_audit:.4f}", file=sys.stderr, flush=True)
-    print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
+    print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
 
     # Exit 0 = success (required by baseline-reproduces gate)
     sys.exit(0)
@@ -531,6 +676,7 @@ if __name__ == "__main__":
         # CRITICAL: Debug output MUST go to stderr, never stdout
         print(f"[DEBUG] Fatal crash: {str(e)}", file=sys.stderr, flush=True)
         import traceback
+
         traceback.print_exc(file=sys.stderr)
         # Emit minimal structured output so validator can parse it
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)

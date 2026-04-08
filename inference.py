@@ -462,7 +462,9 @@ def main():
         for var in missing:
             print(f"[DEBUG]   export {var}='...'", file=sys.stderr, flush=True)
         print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", file=sys.stderr, flush=True)
-        sys.exit(1)
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        sys.exit(0)
 
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", file=sys.stderr, flush=True)
@@ -500,14 +502,22 @@ def main():
 
     # ── Verify server is reachable (automated ping gate) ─────────────────────
     print(f"[DEBUG] Pinging server: {args.server}/health ...", file=sys.stderr, flush=True)
-    health = _call_server(args.server, "GET", "/health")
-    status = health.get("status", "unknown")
-    tasks_loaded = health.get("tasks_loaded", [])
-    print(f"[DEBUG] Status: {status} | Tasks loaded: {tasks_loaded}", file=sys.stderr, flush=True)
+    try:
+        health = _call_server(args.server, "GET", "/health")
+        status = health.get("status", "unknown")
+        tasks_loaded = health.get("tasks_loaded", [])
+        print(f"[DEBUG] Status: {status} | Tasks loaded: {tasks_loaded}", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"[DEBUG] Server health check error: {e}", file=sys.stderr, flush=True)
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        sys.exit(0)
 
     if status != "ok":
         print("[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True)
-        sys.exit(1)
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        sys.exit(0)
 
     # (Client has already been built and pinged before server ping)
 
@@ -550,5 +560,8 @@ if __name__ == "__main__":
         print(f"[DEBUG] Fatal crash: {str(e)}", file=sys.stderr, flush=True)
         import traceback
         traceback.print_exc(file=sys.stderr)
-        # We must exit with 1 so the validator doesn't think it succeeded!
-        sys.exit(1)
+        # Emit minimal structured output so validator can parse it
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        # MUST exit 0 — validator treats non-zero as "unhandled exception"
+        sys.exit(0)

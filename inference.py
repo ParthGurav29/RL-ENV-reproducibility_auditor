@@ -442,8 +442,8 @@ def main():
     # API_KEY takes priority; fall back to HF_TOKEN or OPENAI_API_KEY
     API_KEY        = os.environ.get("API_KEY", "") or HF_TOKEN or OPENAI_API_KEY
 
-    # Defensive API_BASE_URL handling
-    if API_BASE_URL and "huggingface" in API_BASE_URL and not API_BASE_URL.endswith("/v1"):
+    # Defensive API_BASE_URL handling (LiteLLM proxy and OpenAI client require /v1)
+    if API_BASE_URL and not API_BASE_URL.rstrip("/").endswith("/v1"):
         API_BASE_URL = API_BASE_URL.rstrip("/") + "/v1"
 
     # ── Validate required environment variables ───────────────────────────────

@@ -44,7 +44,6 @@ import time
 import argparse
 import requests
 from typing import Optional, List
-from openai import OpenAI
 
 # Try to load .env for local development only
 # In validator/production, env vars are injected directly
@@ -261,29 +260,27 @@ def _call_server(
         raise
 
 
-def _call_llm_with_retry(client: OpenAI, messages: list, model: str) -> str:
-    """Call the LLM with retry logic. Returns the response text."""
-    last_error = None
-    for attempt in range(1, LLM_MAX_RETRIES + 1):
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.1,
-                timeout=LLM_TIMEOUT,
-            )
-            content = resp.choices[0].message.content
-            return content.strip() if content else ""
-        except Exception as e:
-            last_error = e
-            if attempt < LLM_MAX_RETRIES:
-                print(
-                    f"[DEBUG] LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                time.sleep(LLM_RETRY_DELAY)
-    raise last_error if last_error else RuntimeError("LLM call failed")
+def call_llm(messages):
+    try:
+        base_url = os.environ['API_BASE_URL'].rstrip('/')
+        response = requests.post(
+            f"{base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {os.environ['API_KEY']}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": os.environ["MODEL_NAME"],
+                "messages": messages,
+                "temperature": 0.1,
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"[DEBUG] LLM HTTP call failed: {e}", file=sys.stderr)
+        raise
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -337,7 +334,7 @@ def _sanitize_audit_dict(audit: dict) -> dict:
     return audit
 
 
-def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, float]:
+def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
     """Run one 2-step task episode via the HTTP server.
 
     Emits mandatory [START], [STEP], [END] structured logs.
@@ -368,13 +365,11 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         # ── Step 1: Triage ────────────────────────────────────────────────────
         triage_error = None
         try:
-            triage_str = _call_llm_with_retry(
-                client,
+            triage_str = call_llm(
                 [
                     {"role": "system", "content": TRIAGE_PROMPT},
                     {"role": "user", "content": observation},
-                ],
-                MODEL_NAME,
+                ]
             )
             triage_dict = _parse_llm_json(triage_str)
         except json.JSONDecodeError as e:
@@ -441,13 +436,11 @@ def evaluate_task(task_name: str, client: OpenAI, server: str) -> tuple[float, f
         # ── Step 2: Full Audit ────────────────────────────────────────────────
         audit_error = None
         try:
-            audit_str = _call_llm_with_retry(
-                client,
+            audit_str = call_llm(
                 [
                     {"role": "system", "content": AUDIT_PROMPT},
                     {"role": "user", "content": enhanced_obs},
-                ],
-                MODEL_NAME,
+                ]
             )
             audit_dict = _parse_llm_json(audit_str)
         except json.JSONDecodeError as e:
@@ -586,21 +579,14 @@ def main():
     print(f"[DEBUG]   Relevant envs: {relevant_envs}", file=sys.stderr, flush=True)
     print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
 
-    # ── Build OpenAI client ───────────────────────────────────────────────────
-    # STRICT COMPLIANCE: Use EXACTLY os.environ["API_BASE_URL"] and os.environ["API_KEY"]
-    # as the validator specifically checks for these exact subscript expressions
-    try:
-        client = OpenAI(
-            base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"]
-        )
-    except KeyError:
-        # Fallback if API_KEY not set - try HF_TOKEN
-        client = OpenAI(
-            base_url=os.environ["API_BASE_URL"], api_key=os.environ.get("HF_TOKEN", "")
-        )
-    print(f"[DEBUG] Client base_url: {client.base_url}", file=sys.stderr, flush=True)
+    # ── Set environment variables for call_llm ────────────────────────────────
+    os.environ["API_BASE_URL"] = API_BASE_URL
+    os.environ["API_KEY"] = API_KEY
+    os.environ["MODEL_NAME"] = MODEL_NAME
+    
+    print(f"[DEBUG] Raw Requests base_url: {os.environ['API_BASE_URL']}", file=sys.stderr, flush=True)
     print(
-        f"[DEBUG] Client api_key:  {client.api_key[:8] if client.api_key else 'EMPTY'}...",
+        f"[DEBUG] Raw Requests api_key:  {os.environ['API_KEY'][:8] if os.environ['API_KEY'] else 'EMPTY'}...",
         file=sys.stderr,
         flush=True,
     )
@@ -608,13 +594,9 @@ def main():
     # 🔥 CRITICAL PING: Ensure we make at least ONE request so the proxy counts it
     try:
         print("[DEBUG] Pre-flight ping...", file=sys.stderr, flush=True)
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=5,
-        )
+        response_text = call_llm([{"role": "user", "content": "ping"}])
         print(
-            f"[DEBUG] Pre-flight success: {response.choices[0].message.content or 'empty'}",
+            f"[DEBUG] Pre-flight success: {response_text or 'empty'}",
             file=sys.stderr,
             flush=True,
         )
@@ -661,7 +643,7 @@ def main():
 
     print(f"[DEBUG] Starting inference run ...", file=sys.stderr, flush=True)
     for task in tasks:
-        t_score, a_score = evaluate_task(task, client, args.server)
+        t_score, a_score = evaluate_task(task, args.server)
         triage_scores[task] = t_score
         audit_scores[task] = a_score
 

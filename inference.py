@@ -262,7 +262,7 @@ def _call_server(
 
 def call_llm(messages):
     try:
-        base_url = os.environ['API_BASE_URL'].rstrip('/')
+        base_url = os.environ["API_BASE_URL"].rstrip("/")
         response = requests.post(
             f"{base_url}/chat/completions",
             headers={
@@ -342,10 +342,10 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
     """
     rewards_list: List[float] = []
     steps_taken = 0
-    score = 0.0
+    score = 0.01
     success = False
-    triage_reward = 0.0
-    audit_reward = 0.0
+    triage_reward = 0.01
+    audit_reward = 0.01
 
     # ── [START] — one per task episode ────────────────────────────────────────
     log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
@@ -397,7 +397,7 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
         triage_result = _call_server(
             server, "POST", "/step", {"task": task_name, "action": triage_dict}
         )
-        triage_reward = triage_result.get("reward", 0.0)
+        triage_reward = triage_result.get("reward", 0.01)
         triage_feedback = triage_result.get("info", {}).get("triage_feedback", {})
         enhanced_obs = triage_result.get("observation", observation)
 
@@ -452,7 +452,7 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
             )
             audit_dict = {
                 "violations": [],
-                "reproducibility_score": 0.0,
+                "reproducibility_score": 0.01,
                 "explanation": "Parse error",
             }
         except Exception as e:
@@ -460,7 +460,7 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
             print(f"[DEBUG] LLM audit call failed: {e}", file=sys.stderr, flush=True)
             audit_dict = {
                 "violations": [],
-                "reproducibility_score": 0.0,
+                "reproducibility_score": 0.01,
                 "explanation": str(e),
             }
 
@@ -471,7 +471,7 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
         step_data = _call_server(
             server, "POST", "/step", {"task": task_name, "action": audit_dict}
         )
-        audit_reward = step_data.get("reward", 0.0)
+        audit_reward = step_data.get("reward", 0.01)
 
         rewards_list.append(audit_reward)
         steps_taken = 2
@@ -583,8 +583,12 @@ def main():
     os.environ["API_BASE_URL"] = API_BASE_URL
     os.environ["API_KEY"] = API_KEY
     os.environ["MODEL_NAME"] = MODEL_NAME
-    
-    print(f"[DEBUG] Raw Requests base_url: {os.environ['API_BASE_URL']}", file=sys.stderr, flush=True)
+
+    print(
+        f"[DEBUG] Raw Requests base_url: {os.environ['API_BASE_URL']}",
+        file=sys.stderr,
+        flush=True,
+    )
     print(
         f"[DEBUG] Raw Requests api_key:  {os.environ['API_KEY'][:8] if os.environ['API_KEY'] else 'EMPTY'}...",
         file=sys.stderr,

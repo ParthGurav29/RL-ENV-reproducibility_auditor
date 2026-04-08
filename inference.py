@@ -45,25 +45,22 @@ import argparse
 import requests
 from typing import Optional, List
 from openai import OpenAI
-from dotenv import load_dotenv
+# Try to load .env for local development only
+# In validator/production, env vars are injected directly
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)
+except ImportError:
+    pass
 
-# Load .env file so API_BASE_URL, MODEL_NAME, HF_TOKEN are available
-load_dotenv()
-
-# ── Required environment variables (OpenEnv hackathon spec) ──────────────────
-# NOTE: Use .get() with safe defaults so module load NEVER crashes.
-# Validation happens inside main() after structured logging is ready.
-API_BASE_URL   = os.environ.get("API_BASE_URL", "")
-MODEL_NAME     = os.environ.get("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-API_KEY = os.getenv("API_KEY") or HF_TOKEN or OPENAI_API_KEY
-
-# Defensive API_BASE_URL handling
-# Only normalize if clearly needed
-if API_BASE_URL and "huggingface" in API_BASE_URL and not API_BASE_URL.endswith("/v1"):
-    API_BASE_URL = API_BASE_URL.rstrip("/") + "/v1"
+# ── Module-level defaults (safe reads, no crashes) ───────────────────────────
+# NOTE: These are ONLY defaults. main() re-reads from os.environ to pick up
+# validator-injected values that may arrive after module load.
+API_BASE_URL   = ""
+MODEL_NAME     = "Qwen/Qwen2.5-72B-Instruct"
+HF_TOKEN       = None
+OPENAI_API_KEY = None
+API_KEY        = None
 
 # ── Server config ─────────────────────────────────────────────────────────────
 
@@ -436,13 +433,14 @@ def main():
     )
     args = parser.parse_args()
 
-    # ── Re-read env vars inside main() (they may be set by the validator) ──
+    # ── Read env vars FRESH from os.environ (validator injects these) ─────────
     global API_BASE_URL, MODEL_NAME, API_KEY, HF_TOKEN, OPENAI_API_KEY
-    API_BASE_URL   = os.environ.get("API_BASE_URL", API_BASE_URL or "")
-    MODEL_NAME     = os.environ.get("MODEL_NAME", MODEL_NAME or "Qwen/Qwen2.5-72B-Instruct")
-    HF_TOKEN       = os.getenv("HF_TOKEN") or HF_TOKEN
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY
-    API_KEY        = os.getenv("API_KEY") or HF_TOKEN or OPENAI_API_KEY or API_KEY
+    API_BASE_URL   = os.environ.get("API_BASE_URL", "")
+    MODEL_NAME     = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+    HF_TOKEN       = os.environ.get("HF_TOKEN", "")
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    # API_KEY takes priority; fall back to HF_TOKEN or OPENAI_API_KEY
+    API_KEY        = os.environ.get("API_KEY", "") or HF_TOKEN or OPENAI_API_KEY
 
     # Defensive API_BASE_URL handling
     if API_BASE_URL and "huggingface" in API_BASE_URL and not API_BASE_URL.endswith("/v1"):
@@ -455,40 +453,44 @@ def main():
     if not MODEL_NAME:
         missing.append("MODEL_NAME")
     if not API_KEY:
-        missing.append("HF_TOKEN (or OPENAI_API_KEY)")
+        missing.append("API_KEY (or HF_TOKEN or OPENAI_API_KEY)")
 
     if missing:
         print("[DEBUG] ERROR: Missing required environment variables:", file=sys.stderr, flush=True)
         for var in missing:
             print(f"[DEBUG]   export {var}='...'", file=sys.stderr, flush=True)
-        print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", file=sys.stderr, flush=True)
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
         print("[END] success=false steps=0 rewards=", flush=True)
         sys.exit(0)
 
+    # ── Debug: show exactly which env vars are being used ─────────────────────
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", file=sys.stderr, flush=True)
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   API_BASE_URL : {API_BASE_URL}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   MODEL_NAME   : {MODEL_NAME}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   API_KEY      : {API_KEY[:8]}... (from {'API_KEY' if os.environ.get('API_KEY') else 'HF_TOKEN' if HF_TOKEN else 'OPENAI_API_KEY'})", file=sys.stderr, flush=True)
     print(f"[DEBUG]   HF_TOKEN     : {'set' if HF_TOKEN else 'not set'}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   Server       : {args.server}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   Episode mode : 2-step (triage → audit)", file=sys.stderr, flush=True)
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
 
-    # Allow local execution fallback for API_KEY without breaking the exact AST requirement
-    os.environ.setdefault("API_KEY", os.getenv("HF_TOKEN", os.getenv("OPENAI_API_KEY", "")))
-    os.environ.setdefault("API_BASE_URL", API_BASE_URL)
+    # ── Build OpenAI client ───────────────────────────────────────────────────
+    # CRITICAL: Ensure API_KEY is in os.environ so os.environ["API_KEY"] works
+    # The validator injects API_KEY directly. For local testing, fall back to HF_TOKEN.
+    if "API_KEY" not in os.environ:
+        os.environ["API_KEY"] = API_KEY
+    if "API_BASE_URL" not in os.environ:
+        os.environ["API_BASE_URL"] = API_BASE_URL
 
-    # ── Build OpenAI client (MUST HAPPEN BEFORE SERVER PING TO AVOID NO-CALLS IF SERVER TIMES OUT)
     client = OpenAI(
         base_url=os.environ["API_BASE_URL"],
         api_key=os.environ["API_KEY"]
     )
-    print(f"[DEBUG] BASE URL: {client.base_url}", file=sys.stderr, flush=True)
-    print(f"[DEBUG] API KEY: {client.api_key[:5] if client.api_key else 'None'}...", file=sys.stderr, flush=True)
-    
-    # 🔥 CRITICAL PING: Ensure we make at least ONE request right now so the proxy counts it
+    print(f"[DEBUG] Client base_url: {client.base_url}", file=sys.stderr, flush=True)
+    print(f"[DEBUG] Client api_key:  {client.api_key[:8] if client.api_key else 'EMPTY'}...", file=sys.stderr, flush=True)
+
+    # 🔥 CRITICAL PING: Ensure we make at least ONE request so the proxy counts it
     try:
         print("[DEBUG] Pre-flight ping...", file=sys.stderr, flush=True)
         response = client.chat.completions.create(

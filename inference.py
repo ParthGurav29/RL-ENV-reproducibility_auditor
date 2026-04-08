@@ -51,7 +51,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Required environment variables (OpenEnv hackathon spec) ──────────────────
-API_BASE_URL   = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
+API_BASE_URL   = os.environ.get("API_BASE_URL")
 MODEL_NAME     = os.environ.get("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -455,8 +455,8 @@ def main():
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
 
     # ── Build OpenAI client (MUST HAPPEN BEFORE SERVER PING TO AVOID NO-CALLS IF SERVER TIMES OUT)
-    baseline_url = os.environ.get("API_BASE_URL", API_BASE_URL)
-    baseline_key = os.environ.get("API_KEY", API_KEY)
+    baseline_url = os.environ["API_BASE_URL"]
+    baseline_key = os.environ["API_KEY"]
     
     client = OpenAI(
         base_url=baseline_url,

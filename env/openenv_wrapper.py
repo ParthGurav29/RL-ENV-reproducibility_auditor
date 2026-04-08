@@ -21,6 +21,7 @@ from env.base_env import ReproducibilityAuditorEnv, ALL_CATEGORIES
 
 class TriageAction(BaseModel):
     """Step 1 action — agent identifies suspicious files and violation categories."""
+
     suspicious_files: list[str] = Field(
         default_factory=list,
         description="File names the agent suspects contain reproducibility violations",
@@ -38,13 +39,20 @@ class TriageAction(BaseModel):
 
 
 class ViolationObject(BaseModel):
-    violation_type: str = Field(..., description="The keyword or category of the violation (e.g. 'torch.manual_seed')")
+    violation_type: str = Field(
+        ...,
+        description="The keyword or category of the violation (e.g. 'torch.manual_seed')",
+    )
     file_name: str = Field(..., description="The specific file where it exists")
     line_number: int = Field(..., description="The specific line index")
-    suggested_fix_code: str = Field(..., description="The actual code snippet to be inserted or replaced")
+    suggested_fix_code: str = Field(
+        ..., description="The actual code snippet to be inserted or replaced"
+    )
+
 
 class AuditAction(BaseModel):
     """Step 2 action — the structured audit report an agent must submit."""
+
     violations: list[ViolationObject] = Field(
         default_factory=list,
         description="List of reproducibility violations found in the experiment",
@@ -64,23 +72,28 @@ class AuditAction(BaseModel):
 
 class StepResult(BaseModel):
     """Returned by every call to step()."""
+
     observation: str
     reward: float = Field(ge=0.0, le=1.0)
     terminated: bool
     truncated: bool
-    done: bool = Field(default=False, description="True when episode is finished (terminated or truncated)")
+    done: bool = Field(
+        default=False,
+        description="True when episode is finished (terminated or truncated)",
+    )
     info: dict[str, Any]
 
 
 class ResetResult(BaseModel):
     """Returned by reset()."""
+
     observation: str
     info: dict[str, Any]
 
 
 class EnvState(BaseModel):
     """Full serialisable state — required by OpenEnv spec.
-    
+
     Extended with forensic metadata beyond basic step tracking:
       - episode_seed: the RNG seed used for presentation randomization
       - difficulty: the task's difficulty tier
@@ -89,6 +102,7 @@ class EnvState(BaseModel):
       - is_episode_active: whether the episode is still in progress
       - current_step: which step of the episode we're on (0=reset, 1=triage done, 2=audit done)
     """
+
     task: str
     difficulty: str
     step_count: int
@@ -106,6 +120,7 @@ class EnvState(BaseModel):
 
 # ── Wrapper ───────────────────────────────────────────────────────────────────
 
+
 class ReproducibilityEnvOpenEnv:
     """
     OpenEnv-compliant wrapper around ReproducibilityAuditorEnv.
@@ -118,36 +133,40 @@ class ReproducibilityEnvOpenEnv:
     """
 
     VERSION = "1.0.0"
-    ENV_ID  = "reproducibility-auditor-v1"
+    ENV_ID = "reproducibility-auditor-v1"
 
     def __init__(self, task: str = "easy"):
-        self._inner    = ReproducibilityAuditorEnv(task=task)
-        self._task     = task
-        self._step_count       = 0
-        self._last_reward      = None
-        self._last_breakdown   = None
-        self._episode_seed     = None
+        self._inner = ReproducibilityAuditorEnv(task=task)
+        self._task = task
+        self._step_count = 0
+        self._last_reward = None
+        self._last_breakdown = None
+        self._episode_seed = None
         self._active_violations: list[str] = []
-        self._is_active        = False
+        self._is_active = False
         self._triage_completed = False
 
     # ── Core API ──────────────────────────────────────────────────────────────
 
     def reset(self) -> ResetResult:
         obs, info = self._inner.reset()
-        self._step_count     = 0
-        self._last_reward    = None
+        self._step_count = 0
+        self._last_reward = None
         self._last_breakdown = None
-        self._episode_seed   = info.get("episode_seed")
+        self._episode_seed = info.get("episode_seed")
         self._active_violations = info.get("active_violations", [])
-        self._is_active      = True
+        self._is_active = True
         self._triage_completed = False
-        clean_info = {k: v for k, v in info.items() if k not in ("active_violations", "num_active_violations")}
+        clean_info = {
+            k: v
+            for k, v in info.items()
+            if k not in ("active_violations", "num_active_violations")
+        }
         return ResetResult(observation=obs, info=clean_info)
 
     def step(self, action: str | dict | TriageAction | AuditAction) -> StepResult:
         import concurrent.futures
-        
+
         # Auto-detect action type from dict keys (robust — no reliance on step count)
         is_triage = self._detect_triage(action)
 
@@ -171,20 +190,20 @@ class ReproducibilityEnvOpenEnv:
         except concurrent.futures.TimeoutError:
             # Step timed out - return safe failure result
             obs = "Step execution timed out after 10 seconds."
-            reward = 0.0
+            reward = 0.01
             terminated = True
             truncated = True
             info = {"error": "Step timed out", "score_breakdown": {}}
         except Exception as e:
             # Any other error - return safe failure result
             obs = f"Step failed with error: {str(e)}"
-            reward = 0.0
+            reward = 0.01
             terminated = True
             truncated = True
             info = {"error": str(e), "score_breakdown": {}}
 
-        self._step_count     += 1
-        self._last_reward     = reward
+        self._step_count += 1
+        self._last_reward = reward
 
         if is_triage:
             self._triage_completed = True
@@ -231,29 +250,29 @@ class ReproducibilityEnvOpenEnv:
     @staticmethod
     def spec() -> dict:
         return {
-            "env_id":          ReproducibilityEnvOpenEnv.ENV_ID,
-            "version":         ReproducibilityEnvOpenEnv.VERSION,
-            "tasks":           ["easy", "medium", "hard"],
+            "env_id": ReproducibilityEnvOpenEnv.ENV_ID,
+            "version": ReproducibilityEnvOpenEnv.VERSION,
+            "tasks": ["easy", "medium", "hard"],
             "observation_type": "text",
             "observation_schema": {
                 "experiment_code": "Text — concatenated experiment source files with metadata header",
                 "task_difficulty": "Text — easy | medium | hard",
-                "num_files":       "int — number of source files in the experiment",
-                "focus_areas":     "Text — comma-separated violation categories to check",
-                "triage_feedback":  "Text — (step 2 only) feedback from triage step confirming/rejecting agent's preliminary findings",
+                "num_files": "int — number of source files in the experiment",
+                "focus_areas": "Text — comma-separated violation categories to check",
+                "triage_feedback": "Text — (step 2 only) feedback from triage step confirming/rejecting agent's preliminary findings",
             },
-            "action_type":     "json",
+            "action_type": "json",
             "action_schema": {
                 "step_1_triage": TriageAction.model_json_schema(),
-                "step_2_audit":  AuditAction.model_json_schema(),
+                "step_2_audit": AuditAction.model_json_schema(),
             },
-            "reward_range":    [0.0, 1.0],
-            "episode_steps":   2,
+            "reward_range": [0.0, 1.0],
+            "episode_steps": 2,
             "step_descriptions": {
                 "step_1": "Triage — identify suspicious files and violation categories. Receives feedback.",
                 "step_2": "Audit — submit full violation report with fixes. Final grading.",
             },
-            "randomization":   "Violation-level: random subset of bugs injected per episode. Presentation-level: file order, decoy comments, whitespace.",
+            "randomization": "Violation-level: random subset of bugs injected per episode. Presentation-level: file order, decoy comments, whitespace.",
             "description": (
                 "Agent audits a broken ML experiment and identifies reproducibility "
                 "violations across seeds, dependencies, non-deterministic ops, and "

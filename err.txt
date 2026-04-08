@@ -1,0 +1,69 @@
+[DEBUG] ========================================================
+[DEBUG]   OpenEnv Reproducibility Auditor — Baseline
+[DEBUG] ========================================================
+[DEBUG]   API_BASE_URL : https://litellm.sclr.ac
+[DEBUG]   MODEL_NAME   : Qwen/Qwen2.5-72B-Instruct
+[DEBUG]   HF_TOKEN     : set
+[DEBUG]   Server       : https://prime23457890-reproducibility-auditor.hf.space
+[DEBUG]   Episode mode : 2-step (triage → audit)
+[DEBUG] ========================================================
+[DEBUG] BASE URL: https://litellm.sclr.ac
+[DEBUG] API KEY: hf_Wy...
+[DEBUG] Pre-flight ping...
+[DEBUG] Pre-flight failed (expected locally): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] Pinging server: https://prime23457890-reproducibility-auditor.hf.space/health ...
+[DEBUG] Status: ok | Tasks loaded: ['easy', 'medium', 'hard']
+[DEBUG] Starting inference run ...
+[DEBUG] Task easy: 0 active violations, 2 steps
+[DEBUG] LLM call failed (attempt 1/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM call failed (attempt 2/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM triage call failed: Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] Triage reward: 0.0000
+[DEBUG] LLM call failed (attempt 1/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM call failed (attempt 2/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM audit call failed: Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG]  ❌  missing_numpy_seed
+[DEBUG]  ❌  missing_torch_seed
+[DEBUG]  ❌  missing_cuda_seed
+[DEBUG]  ❌  unpinned_numpy
+[DEBUG]  ❌  unpinned_scikit-learn
+[DEBUG]  ❌  unpinned_pandas
+[DEBUG]  ❌  missing_hashseed
+[DEBUG] Audit reward: 0.0000
+[DEBUG] Task medium: 0 active violations, 2 steps
+[DEBUG] LLM call failed (attempt 1/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM call failed (attempt 2/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM triage call failed: Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] Triage reward: 0.0000
+[DEBUG] LLM call failed (attempt 1/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM call failed (attempt 2/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM audit call failed: Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG]  ❌  missing_deterministic_flag
+[DEBUG]  ❌  missing_cudnn_benchmark_off
+[DEBUG]  ❌  missing_default_rng_seed
+[DEBUG]  ❌  missing_dropout_seed
+[DEBUG] Audit reward: 0.0000
+[DEBUG] Task hard: 0 active violations, 2 steps
+[DEBUG] LLM call failed (attempt 1/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM call failed (attempt 2/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM triage call failed: Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] Triage reward: 0.0000
+[DEBUG] LLM call failed (attempt 1/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM call failed (attempt 2/3): Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG] LLM audit call failed: Error code: 401 - {'error': {'message': "Authentication Error, LiteLLM Virtual Key expected. Received=hf_W****Urvb, expected to start with 'sk-'.", 'type': 'auth_error', 'param': 'None', 'code': '401'}}
+[DEBUG]  ❌  worker_seed_cross_file
+[DEBUG]  ❌  cublas_workspace_config
+[DEBUG]  ❌  model_weight_init_seed
+[DEBUG]  ❌  config_yaml_override
+[DEBUG]  ❌  hash_randomization
+[DEBUG]  ❌  multiprocessing_no_seed
+[DEBUG] Audit reward: 0.0000
+[DEBUG] ========================================================
+[DEBUG]   PER-TASK SCORES:
+[DEBUG]   easy    : triage=0.0000  audit=0.0000
+[DEBUG]   medium  : triage=0.0000  audit=0.0000
+[DEBUG]   hard    : triage=0.0000  audit=0.0000
+[DEBUG]   ────────────────────────────────────────────────────
+[DEBUG]   AVG TRIAGE SCORE: 0.0000
+[DEBUG]   AVG AUDIT SCORE:  0.0000
+[DEBUG] ========================================================

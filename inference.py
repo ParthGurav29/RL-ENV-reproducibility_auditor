@@ -51,19 +51,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Required environment variables (OpenEnv hackathon spec) ──────────────────
-API_BASE_URL   = os.environ["API_BASE_URL"]
+# NOTE: Use .get() with safe defaults so module load NEVER crashes.
+# Validation happens inside main() after structured logging is ready.
+API_BASE_URL   = os.environ.get("API_BASE_URL", "")
 MODEL_NAME     = os.environ.get("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 API_KEY = os.getenv("API_KEY") or HF_TOKEN or OPENAI_API_KEY
 
-if not API_KEY:
-    raise ValueError("No API key found (API_KEY / HF_TOKEN / OPENAI_API_KEY)")
-
 # Defensive API_BASE_URL handling
 # Only normalize if clearly needed
-if "huggingface" in API_BASE_URL and not API_BASE_URL.endswith("/v1"):
+if API_BASE_URL and "huggingface" in API_BASE_URL and not API_BASE_URL.endswith("/v1"):
     API_BASE_URL = API_BASE_URL.rstrip("/") + "/v1"
 
 # ── Server config ─────────────────────────────────────────────────────────────
@@ -84,6 +83,17 @@ SUCCESS_SCORE_THRESHOLD = 0.1   # normalized score in [0, 1]
 def log_start(task: str, env: str, model: str) -> None:
     """Emit [START] line at episode begin."""
     print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def _sanitize_error(error: Optional[str]) -> str:
+    """Sanitize error strings to avoid breaking the structured log parser.
+    Remove newlines, curly braces, and truncate to 120 chars."""
+    if not error:
+        return "null"
+    clean = error.replace("\n", " ").replace("{", "(").replace("}", ")").replace("'", "")
+    if len(clean) > 120:
+        clean = clean[:117] + "..."
+    return clean
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
@@ -219,8 +229,7 @@ def _call_server(server: str, method: str, path: str, payload: dict | None = Non
     except requests.exceptions.ConnectionError:
         print(f"[DEBUG] Cannot connect to server at {server}.", file=sys.stderr, flush=True)
         print(f"[DEBUG] Start the server first: uvicorn server:app --host 0.0.0.0 --port 7860", file=sys.stderr, flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
-        sys.exit(0)
+        raise
     except requests.exceptions.Timeout:
         print(f"[DEBUG] Server request timed out ({REQUEST_TIMEOUT}s)", file=sys.stderr, flush=True)
         raise
@@ -427,6 +436,18 @@ def main():
     )
     args = parser.parse_args()
 
+    # ── Re-read env vars inside main() (they may be set by the validator) ──
+    global API_BASE_URL, MODEL_NAME, API_KEY, HF_TOKEN, OPENAI_API_KEY
+    API_BASE_URL   = os.environ.get("API_BASE_URL", API_BASE_URL or "")
+    MODEL_NAME     = os.environ.get("MODEL_NAME", MODEL_NAME or "Qwen/Qwen2.5-72B-Instruct")
+    HF_TOKEN       = os.getenv("HF_TOKEN") or HF_TOKEN
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY
+    API_KEY        = os.getenv("API_KEY") or HF_TOKEN or OPENAI_API_KEY or API_KEY
+
+    # Defensive API_BASE_URL handling
+    if API_BASE_URL and "huggingface" in API_BASE_URL and not API_BASE_URL.endswith("/v1"):
+        API_BASE_URL = API_BASE_URL.rstrip("/") + "/v1"
+
     # ── Validate required environment variables ───────────────────────────────
     missing = []
     if not API_BASE_URL:
@@ -441,6 +462,7 @@ def main():
         for var in missing:
             print(f"[DEBUG]   export {var}='...'", file=sys.stderr, flush=True)
         print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", file=sys.stderr, flush=True)
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
         print("[END] success=false steps=0 rewards=", flush=True)
         sys.exit(0)
 
@@ -490,6 +512,7 @@ def main():
 
     if status != "ok":
         print("[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True)
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
         print("[END] success=false steps=0 rewards=", flush=True)
         sys.exit(0)
 
@@ -530,7 +553,9 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        import sys
-        print(f"[DEBUG] Fatal crash: {str(e)}")
+        # CRITICAL: Debug output MUST go to stderr, never stdout
+        print(f"[DEBUG] Fatal crash: {str(e)}", file=sys.stderr, flush=True)
+        # Emit minimal valid structured block to stdout
+        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
         print("[END] success=false steps=0 rewards=", flush=True)
         sys.exit(0)

@@ -579,8 +579,8 @@ def main():
     print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
 
     # ── Build OpenAI client ───────────────────────────────────────────────────
-    # STRICT COMPLIANCE: Must initialize directly from os.environ dictionary
-    client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
+    # STRICT COMPLIANCE: Must use the resolved variables, not os.environ directly
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     print(f"[DEBUG] Client base_url: {client.base_url}", file=sys.stderr, flush=True)
     print(
         f"[DEBUG] Client api_key:  {client.api_key[:8] if client.api_key else 'EMPTY'}...",

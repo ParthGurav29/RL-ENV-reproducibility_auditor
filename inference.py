@@ -110,11 +110,11 @@ def log_step(
     )
 
 
-def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     """Emit [END] line at episode end — always emitted, even on exception."""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -499,6 +499,7 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as e:
+        score = 0.01  # <--- MUST ensure score is safe if an error happens
         print(
             f"[DEBUG] Task {task_name} failed with error: {e}",
             file=sys.stderr,
@@ -507,7 +508,7 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
 
     finally:
         # ── [END] — always emitted, even on exception ────────────────────────
-        log_end(success=success, steps=steps_taken, rewards=rewards_list)
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards_list)
 
     return triage_reward, audit_reward
 
@@ -551,7 +552,7 @@ def main():
             flush=True,
         )
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
+        print("[END] success=false steps=0 score=0.01 rewards=", flush=True)
         sys.exit(0)
 
     # ── Debug: show exactly which env vars are being used ─────────────────────
@@ -627,7 +628,7 @@ def main():
     except Exception as e:
         print(f"[DEBUG] Server health check error: {e}", file=sys.stderr, flush=True)
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
+        print("[END] success=false steps=0 score=0.01 rewards=", flush=True)
         sys.exit(0)
 
     if status != "ok":
@@ -635,7 +636,7 @@ def main():
             "[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True
         )
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
+        print("[END] success=false steps=0 score=0.01 rewards=", flush=True)
         sys.exit(0)
 
     # (Client has already been built and pinged before server ping)
@@ -683,6 +684,6 @@ if __name__ == "__main__":
         traceback.print_exc(file=sys.stderr)
         # Emit minimal structured output so validator can parse it
         print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
+        print("[END] success=false steps=0 score=0.01 rewards=", flush=True)
         # MUST exit 0 — validator treats non-zero as "unhandled exception"
         sys.exit(0)

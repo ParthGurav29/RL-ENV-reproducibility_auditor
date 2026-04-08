@@ -216,7 +216,7 @@ class ReproducibilityEnvOpenEnv:
 
         return StepResult(
             observation=str(obs) if obs is not None else "",
-            reward=reward,
+            reward=round(max(0.01, min(0.99, reward)), 4),
             terminated=terminated,
             truncated=truncated,
             done=terminated or truncated,

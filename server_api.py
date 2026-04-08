@@ -40,12 +40,13 @@ app = FastAPI(
     title="ML Reproducibility Auditor — OpenEnv",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",      # 👈 force enable
-    redoc_url="/redoc"     # 👈 optional
+    docs_url="/docs",  # 👈 force enable
+    redoc_url="/redoc",  # 👈 optional
 )
 
 
 # ── Request / response models ─────────────────────────────────────────────────
+
 
 class ResetRequest(BaseModel):
     task: str = "easy"
@@ -74,6 +75,7 @@ class StepRequest(BaseModel):
 
 # ── Action normalizer ─────────────────────────────────────────────────────────
 
+
 def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
     """Coerce any incoming action dict into a valid TriageAction or AuditAction.
 
@@ -89,7 +91,7 @@ def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
         # Completely empty → safe AuditAction that scores 0.0
         return {
             "violations": [],
-            "reproducibility_score": 0.0,
+            "reproducibility_score": 0.01,
             "explanation": "No action provided.",
         }
 
@@ -101,9 +103,9 @@ def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
     )
     if is_triage:
         return {
-            "suspicious_files":    action.get("suspicious_files", []),
+            "suspicious_files": action.get("suspicious_files", []),
             "suspected_categories": action.get("suspected_categories", []),
-            "reasoning":           action.get("reasoning", ""),
+            "reasoning": action.get("reasoning", ""),
         }
 
     # ── Detect audit intent ───────────────────────────────────────────────────
@@ -114,9 +116,9 @@ def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
     )
     if is_audit:
         return {
-            "violations":            action.get("violations", []),
-            "reproducibility_score": float(action.get("reproducibility_score", 0.0)),
-            "explanation":           str(action.get("explanation", "")),
+            "violations": action.get("violations", []),
+            "reproducibility_score": float(action.get("reproducibility_score", 0.01)),
+            "explanation": str(action.get("explanation", "")),
         }
 
     # ── Minimal / freeform input (e.g. {"message": "fix seeds"}) ─────────────
@@ -127,14 +129,17 @@ def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
         or action.get("content")
         or str(action)
     )
-    return {
-        "violations": [],
-        "reproducibility_score": 0.0,
-        "explanation": str(message),
-    }
+
+
+return {
+    "violations": [],
+    "reproducibility_score": 0.01,
+    "explanation": str(message),
+}
 
 
 # ── Core Endpoints ────────────────────────────────────────────────────────────
+
 
 @app.get("/")
 def root():
@@ -154,10 +159,17 @@ def get_spec():
 
 
 @app.get("/reset")
-def reset_get(task: str = Query(default="easy", description="Task difficulty: easy | medium | hard")):
+def reset_get(
+    task: str = Query(
+        default="easy", description="Task difficulty: easy | medium | hard"
+    ),
+):
     """Reset via GET — validators may call GET /reset?task=easy."""
     if task not in envs:
-        raise HTTPException(status_code=400, detail=f"Unknown task: {task!r}. Must be one of: easy, medium, hard")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown task: {task!r}. Must be one of: easy, medium, hard",
+        )
     result = envs[task].reset()
     return result.model_dump()
 
@@ -167,7 +179,10 @@ def reset_post(req: Optional[ResetRequest] = None):
     """Reset via POST — inference.py and OpenEnv harness use this."""
     task = req.task if req and req.task else "easy"
     if task not in envs:
-        raise HTTPException(status_code=400, detail=f"Unknown task: {task!r}. Must be one of: easy, medium, hard")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown task: {task!r}. Must be one of: easy, medium, hard",
+        )
     result = envs[task].reset()
     return result.model_dump()
 
@@ -185,7 +200,7 @@ async def step(req: StepRequest):
     raises 422 for missing optional fields.
     """
     import asyncio
-    
+
     if req.task not in envs:
         raise HTTPException(
             status_code=400,
@@ -207,19 +222,14 @@ async def step(req: StepRequest):
     try:
         # Execute step with 15 second hard timeout
         result = await asyncio.wait_for(
-            asyncio.to_thread(env.step, normalized),
-            timeout=15
+            asyncio.to_thread(env.step, normalized), timeout=15
         )
     except asyncio.TimeoutError:
         raise HTTPException(
-            status_code=504,
-            detail="Step execution timed out after 15 seconds"
+            status_code=504, detail="Step execution timed out after 15 seconds"
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Environment error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Environment error: {str(e)}")
 
     # Record to leaderboard
     breakdown = result.info.get("score_breakdown", {})
@@ -227,13 +237,15 @@ async def step(req: StepRequest):
     checks_total = len(breakdown)
 
     try:
-        leaderboard_entries.append({
-            "task": req.task,
-            "reward": result.reward,
-            "checks_passed": checks_passed,
-            "checks_total": checks_total,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        leaderboard_entries.append(
+            {
+                "task": req.task,
+                "reward": result.reward,
+                "checks_passed": checks_passed,
+                "checks_total": checks_total,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     except:
         pass
 
@@ -250,8 +262,13 @@ def state(task: str = "easy"):
 
 # ── Leaderboard Endpoint ─────────────────────────────────────────────────────
 
+
 @app.get("/leaderboard")
-def leaderboard(task: str | None = Query(default=None, description="Filter by task (easy/medium/hard)")):
+def leaderboard(
+    task: str | None = Query(
+        default=None, description="Filter by task (easy/medium/hard)"
+    ),
+):
     """Return scoring history with per-task statistics.
 
     Optional query parameter `task` filters to a specific difficulty tier.
@@ -284,8 +301,12 @@ def leaderboard(task: str | None = Query(default=None, description="Filter by ta
             }
 
     # Overall average across best per-task scores
-    best_scores = [s["best_score"] for s in summary.values() if s["best_score"] is not None]
-    overall_best_avg = round(sum(best_scores) / len(best_scores), 4) if best_scores else None
+    best_scores = [
+        s["best_score"] for s in summary.values() if s["best_score"] is not None
+    ]
+    overall_best_avg = (
+        round(sum(best_scores) / len(best_scores), 4) if best_scores else None
+    )
 
     return {
         "total_submissions": len(leaderboard_entries),

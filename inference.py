@@ -59,11 +59,10 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 # HF_TOKEN is the hackathon-standard key; OPENAI_API_KEY is accepted as fallback
 API_KEY = HF_TOKEN or OPENAI_API_KEY
 
-# Normalize API_BASE_URL: OpenAI client requires it to end in /v1 (or /v1/)
-_base = API_BASE_URL.rstrip("/")
-if not _base.endswith("/v1"):
-    _base = _base + "/v1"
-API_BASE_URL_NORMALIZED = _base + "/"
+# Defensive API_BASE_URL handling
+# Only normalize if clearly needed
+if "huggingface" in API_BASE_URL and not API_BASE_URL.endswith("/v1"):
+    API_BASE_URL = API_BASE_URL.rstrip("/") + "/v1"
 
 # ── Server config ─────────────────────────────────────────────────────────────
 
@@ -463,7 +462,14 @@ def main():
         sys.exit(1)
 
     # ── Build OpenAI client (spec: must use OpenAI client for all LLM calls) ─
-    client = OpenAI(base_url=API_BASE_URL_NORMALIZED, api_key=API_KEY)
+    try:
+        client = OpenAI(
+            base_url=API_BASE_URL,
+            api_key=API_KEY
+        )
+    except Exception as e:
+        print(f"[DEBUG] Client init failed: {e}", file=sys.stderr, flush=True)
+        client = None
 
     # ── Run all three tasks ───────────────────────────────────────────────────
     tasks = ["easy", "medium", "hard"]
@@ -497,4 +503,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import sys
+        print(f"[DEBUG] Fatal crash: {str(e)}")
+        print("[END] success=false steps=0 rewards=")
+        sys.exit(0)

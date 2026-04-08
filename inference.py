@@ -597,7 +597,7 @@ def main():
             max_tokens=5,
         )
         print(
-            f"[DEBUG] Pre-flight success: {response.choices[0].message.content}",
+            f"[DEBUG] Pre-flight success: {response.choices[0].message.content or 'empty'}",
             file=sys.stderr,
             flush=True,
         )

@@ -462,9 +462,7 @@ def main():
         for var in missing:
             print(f"[DEBUG]   export {var}='...'", file=sys.stderr, flush=True)
         print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", file=sys.stderr, flush=True)
-        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
-        sys.exit(0)
+        sys.exit(1)
 
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", file=sys.stderr, flush=True)
@@ -476,20 +474,16 @@ def main():
     print(f"[DEBUG]   Episode mode : 2-step (triage → audit)", file=sys.stderr, flush=True)
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
 
+    # Allow local execution fallback for API_KEY without breaking the exact AST requirement
+    os.environ.setdefault("API_KEY", os.getenv("HF_TOKEN", os.getenv("OPENAI_API_KEY", "")))
+
     # ── Build OpenAI client (MUST HAPPEN BEFORE SERVER PING TO AVOID NO-CALLS IF SERVER TIMES OUT)
-    baseline_url = os.environ["API_BASE_URL"]
- #   baseline_key = os.environ["API_KEY"]
-    baseline_key = API_KEY
-    
     client = OpenAI(
-
-
-        
-        base_url=baseline_url,
-        api_key=baseline_key
+        base_url=os.environ["API_BASE_URL"],
+        api_key=os.environ["API_KEY"]
     )
-    print(f"[DEBUG] BASE URL: {baseline_url}", file=sys.stderr, flush=True)
-    print(f"[DEBUG] API KEY: {baseline_key[:5] if baseline_key else 'None'}...", file=sys.stderr, flush=True)
+    print(f"[DEBUG] BASE URL: {client.base_url}", file=sys.stderr, flush=True)
+    print(f"[DEBUG] API KEY: {client.api_key[:5] if client.api_key else 'None'}...", file=sys.stderr, flush=True)
     
     # 🔥 CRITICAL PING: Ensure we make at least ONE request right now so the proxy counts it
     try:
@@ -512,9 +506,7 @@ def main():
 
     if status != "ok":
         print("[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True)
-        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
-        sys.exit(0)
+        sys.exit(1)
 
     # (Client has already been built and pinged before server ping)
 
@@ -555,7 +547,7 @@ if __name__ == "__main__":
     except Exception as e:
         # CRITICAL: Debug output MUST go to stderr, never stdout
         print(f"[DEBUG] Fatal crash: {str(e)}", file=sys.stderr, flush=True)
-        # Emit minimal valid structured block to stdout
-        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
-        sys.exit(0)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        # We must exit with 1 so the validator doesn't think it succeeded!
+        sys.exit(1)

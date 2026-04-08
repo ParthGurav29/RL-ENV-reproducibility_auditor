@@ -433,35 +433,12 @@ def main():
     )
     args = parser.parse_args()
 
-    # ── Read env vars FRESH from os.environ (validator injects these) ─────────
-    global API_BASE_URL, MODEL_NAME, API_KEY, HF_TOKEN, OPENAI_API_KEY
-    API_BASE_URL   = os.environ.get("API_BASE_URL", "")
-    MODEL_NAME     = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-    HF_TOKEN       = os.environ.get("HF_TOKEN", "")
-    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-    # API_KEY takes priority; fall back to HF_TOKEN or OPENAI_API_KEY
-    API_KEY        = os.environ.get("API_KEY", "") or HF_TOKEN or OPENAI_API_KEY
-
-    # Defensive API_BASE_URL handling (LiteLLM proxy and OpenAI client require /v1)
-    if API_BASE_URL and not API_BASE_URL.rstrip("/").endswith("/v1"):
-        API_BASE_URL = API_BASE_URL.rstrip("/") + "/v1"
-
-    # ── Validate required environment variables ───────────────────────────────
-    missing = []
-    if not API_BASE_URL:
-        missing.append("API_BASE_URL")
-    if not MODEL_NAME:
-        missing.append("MODEL_NAME")
-    if not API_KEY:
-        missing.append("API_KEY (or HF_TOKEN or OPENAI_API_KEY)")
-
-    if missing:
-        print("[DEBUG] ERROR: Missing required environment variables:", file=sys.stderr, flush=True)
-        for var in missing:
-            print(f"[DEBUG]   export {var}='...'", file=sys.stderr, flush=True)
-        print("[START] task=none env=reproducibility-auditor-v1 model=none", flush=True)
-        print("[END] success=false steps=0 rewards=", flush=True)
-        sys.exit(0)
+    # ── Read env vars STRICTLY from os.environ (validator injects these) ──────
+    # Any fallbacks or modifications here will break the validator's strict 
+    # API key proxy tracking! We must use exactly what they provide.
+    API_BASE_URL = os.environ["API_BASE_URL"]
+    API_KEY = os.environ["API_KEY"]
+    MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
     # ── Debug: show exactly which env vars are being used ─────────────────────
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
@@ -469,20 +446,13 @@ def main():
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   API_BASE_URL : {API_BASE_URL}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   MODEL_NAME   : {MODEL_NAME}", file=sys.stderr, flush=True)
-    print(f"[DEBUG]   API_KEY      : {API_KEY[:8]}... (from {'API_KEY' if os.environ.get('API_KEY') else 'HF_TOKEN' if HF_TOKEN else 'OPENAI_API_KEY'})", file=sys.stderr, flush=True)
-    print(f"[DEBUG]   HF_TOKEN     : {'set' if HF_TOKEN else 'not set'}", file=sys.stderr, flush=True)
+    print(f"[DEBUG]   API_KEY      : {API_KEY[:8]}...", file=sys.stderr, flush=True)
     print(f"[DEBUG]   Server       : {args.server}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   Episode mode : 2-step (triage → audit)", file=sys.stderr, flush=True)
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
 
     # ── Build OpenAI client ───────────────────────────────────────────────────
-    # CRITICAL: We must write the correct resolved and normalized values BACK
-    # to os.environ, because the validator requires the exact AST pattern
-    # `base_url=os.environ["API_BASE_URL"]`. If we don't update os.environ,
-    # it uses the un-normalized URL without the /v1 suffix!
-    os.environ["API_KEY"] = API_KEY
-    os.environ["API_BASE_URL"] = API_BASE_URL
-
+    # STRICT COMPLIANCE: Must initialize directly from os.environ dictionary
     client = OpenAI(
         base_url=os.environ["API_BASE_URL"],
         api_key=os.environ["API_KEY"]

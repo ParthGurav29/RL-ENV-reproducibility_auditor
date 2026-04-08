@@ -41,7 +41,7 @@ tasks:
 # ── Interface Specification ──────────────────────────────────────────────────
 observation_type: "text"
 action_type: "json"
-reward_range: [0.0, 1.0]
+reward_range: [0.01, 0.99]
 episode_steps: 2
 
 # ── Multi-Step Episode Flow ──────────────────────────────────────────────────

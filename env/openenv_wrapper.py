@@ -266,7 +266,7 @@ class ReproducibilityEnvOpenEnv:
                 "step_1_triage": TriageAction.model_json_schema(),
                 "step_2_audit": AuditAction.model_json_schema(),
             },
-            "reward_range": [0.0, 1.0],
+            "reward_range": [0.01, 0.99],
             "episode_steps": 2,
             "step_descriptions": {
                 "step_1": "Triage — identify suspicious files and violation categories. Receives feedback.",

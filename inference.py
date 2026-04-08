@@ -574,8 +574,16 @@ def main():
     print(f"[DEBUG]   API_KEY      : {API_KEY[:8]}...", file=sys.stderr, flush=True)
     print(f"[DEBUG]   Server       : {args.server}", file=sys.stderr, flush=True)
     print(
-        f"[DEBUG]   Episode mode : 2-step (triage → audit)", file=sys.stderr, flush=True
+        f"[DEBUG]   Episode mode : 2-step (triage → audit)",
+        file=sys.stderr,
+        flush=True,
     )
+    relevant_envs = {
+        k: v
+        for k, v in os.environ.items()
+        if any(x in k.upper() for x in ["API", "HF", "MODEL"])
+    }
+    print(f"[DEBUG]   Relevant envs: {relevant_envs}", file=sys.stderr, flush=True)
     print(f"[DEBUG] {'=' * 56}", file=sys.stderr, flush=True)
 
     # ── Build OpenAI client ───────────────────────────────────────────────────

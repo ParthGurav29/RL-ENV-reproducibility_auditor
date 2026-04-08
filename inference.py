@@ -528,5 +528,5 @@ if __name__ == "__main__":
     except Exception as e:
         import sys
         print(f"[DEBUG] Fatal crash: {str(e)}")
-        print("[END] success=false steps=0 rewards=")
+        print("[END] success=false steps=0 rewards=", flush=True)
         sys.exit(0)

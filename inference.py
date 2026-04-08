@@ -494,8 +494,8 @@ def evaluate_task(task_name: str, server: str) -> tuple[float, float]:
         print(f"[DEBUG] Audit reward: {audit_reward:.4f}", file=sys.stderr, flush=True)
 
         # Compute final score for this task
-        score = sum(rewards_list) / len(rewards_list) if rewards_list else 0.0
-        score = min(max(score, 0.0), 1.0)
+        score = sum(rewards_list) / len(rewards_list) if rewards_list else 0.01
+        score = min(max(score, 0.01), 0.99)
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as e:

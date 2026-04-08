@@ -76,7 +76,7 @@ class EasyGrader:
                 claim_entries = [(flat_texts, "")]
         except (json.JSONDecodeError, AttributeError):
             breakdown = {k: False for k in ALL_EASY_CHECKS if k in active_violations}
-            return 0.0, breakdown
+            return 0.01, breakdown
 
         # --- Seed checks ---
         self._check_detection(claim_entries, all_detections, "missing_random_seed", [
@@ -127,7 +127,7 @@ class EasyGrader:
 
         raw = hits - 1.0 * false_positives
         n = max(1, len(active_violations))  # guard against empty set (step before reset)
-        reward = round(max(0.0, min(1.0, raw / n)), 4)
+        reward = round(max(0.01, min(0.99, raw / n)), 4)
         return reward, breakdown
 
     def _check_detection(self, claim_entries, all_detections, violation_id, keywords):

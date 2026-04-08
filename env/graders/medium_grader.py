@@ -48,7 +48,7 @@ class MediumGrader:
             claim_entries = _extract_claim_entries(violations_raw, report)
         except (json.JSONDecodeError, AttributeError):
             breakdown = {k: False for k in ALL_MEDIUM_CHECKS if k in active_violations}
-            return 0.0, breakdown
+            return 0.01, breakdown
 
         self._check_detection(claim_entries, all_detections, "dataloader_shuffle_no_seed", [
             "shuffle", "dataloader", "shuffle=true",
@@ -95,7 +95,7 @@ class MediumGrader:
         false_positives = sum(1 for k in ALL_MEDIUM_CHECKS if k not in active_violations and all_detections[k])
         raw = hits - 1.0 * false_positives
         n = max(1, len(active_violations))  # guard against empty set (step before reset)
-        reward = round(max(0.0, min(1.0, raw / n)), 4)
+        reward = round(max(0.01, min(0.99, raw / n)), 4)
         return reward, breakdown
 
     def _check_detection(self, claim_entries, all_detections, violation_id, keywords):

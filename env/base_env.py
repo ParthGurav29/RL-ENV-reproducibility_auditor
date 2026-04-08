@@ -320,6 +320,7 @@ class ReproducibilityAuditorEnv(gym.Env):
 
         # Combined triage reward (file identification weighted higher — it's harder)
         triage_reward = round(0.6 * file_f1 + 0.4 * cat_f1, 4)
+        triage_reward = max(0.01, min(0.99, triage_reward))
 
         # Build feedback dict — tells agent which of its claims were correct
         feedback = {

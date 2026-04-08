@@ -74,7 +74,7 @@ class StepResult(BaseModel):
     """Returned by every call to step()."""
 
     observation: str
-    reward: float = Field(ge=0.0, le=1.0)
+    reward: float = Field(gt=0.0, lt=1.0)
     terminated: bool
     truncated: bool
     done: bool = Field(

@@ -476,6 +476,7 @@ def main():
 
     # Allow local execution fallback for API_KEY without breaking the exact AST requirement
     os.environ.setdefault("API_KEY", os.getenv("HF_TOKEN", os.getenv("OPENAI_API_KEY", "")))
+    os.environ.setdefault("API_BASE_URL", API_BASE_URL)
 
     # ── Build OpenAI client (MUST HAPPEN BEFORE SERVER PING TO AVOID NO-CALLS IF SERVER TIMES OUT)
     client = OpenAI(

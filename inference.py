@@ -54,10 +54,12 @@ load_dotenv()
 API_BASE_URL   = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME     = os.environ.get("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# HF_TOKEN is the hackathon-standard key; OPENAI_API_KEY is accepted as fallback
-API_KEY = HF_TOKEN or OPENAI_API_KEY
+API_KEY = os.getenv("API_KEY") or HF_TOKEN or OPENAI_API_KEY
+
+if not API_KEY:
+    raise ValueError("No API key found (API_KEY / HF_TOKEN / OPENAI_API_KEY)")
 
 # Defensive API_BASE_URL handling
 # Only normalize if clearly needed

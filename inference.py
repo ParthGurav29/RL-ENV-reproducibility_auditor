@@ -219,7 +219,8 @@ def _call_server(server: str, method: str, path: str, payload: dict | None = Non
     except requests.exceptions.ConnectionError:
         print(f"[DEBUG] Cannot connect to server at {server}.", file=sys.stderr, flush=True)
         print(f"[DEBUG] Start the server first: uvicorn server:app --host 0.0.0.0 --port 7860", file=sys.stderr, flush=True)
-        sys.exit(1)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        sys.exit(0)
     except requests.exceptions.Timeout:
         print(f"[DEBUG] Server request timed out ({REQUEST_TIMEOUT}s)", file=sys.stderr, flush=True)
         raise
@@ -440,7 +441,8 @@ def main():
         for var in missing:
             print(f"[DEBUG]   export {var}='...'", file=sys.stderr, flush=True)
         print("[DEBUG] All three variables are required by the OpenEnv hackathon spec.", file=sys.stderr, flush=True)
-        sys.exit(1)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        sys.exit(0)
 
     print(f"[DEBUG] {'='*56}", file=sys.stderr, flush=True)
     print(f"[DEBUG]   OpenEnv Reproducibility Auditor — Baseline", file=sys.stderr, flush=True)
@@ -461,7 +463,8 @@ def main():
 
     if status != "ok":
         print("[DEBUG] Server health check failed. Aborting.", file=sys.stderr, flush=True)
-        sys.exit(1)
+        print("[END] success=false steps=0 rewards=", flush=True)
+        sys.exit(0)
 
     # ── Build OpenAI client (spec: must use OpenAI client for all LLM calls) ─
     try:

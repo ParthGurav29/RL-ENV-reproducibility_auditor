@@ -129,13 +129,11 @@ def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
         or action.get("content")
         or str(action)
     )
-
-
-return {
-    "violations": [],
-    "reproducibility_score": 0.01,
-    "explanation": str(message),
-}
+    return {
+        "violations": [],
+        "reproducibility_score": 0.01,
+        "explanation": str(message),
+    }
 
 
 # ── Core Endpoints ────────────────────────────────────────────────────────────

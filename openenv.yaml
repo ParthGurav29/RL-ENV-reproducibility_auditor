@@ -5,7 +5,7 @@ description: >
   26 violation types across seeds, determinism flags, cross-file gaps,
   and advanced issues. Dynamic violation injection per episode prevents
   memorisation. Two-step episodes with intermediate triage feedback.
-  Rewards in [0.0, 1.0] with partial credit and false-positive penalty.
+  Rewards in (0.01, 0.99) with partial credit and false-positive penalty.
 author: "Team Prime"
 
 # ── Task Definitions ─────────────────────────────────────────────────────────
@@ -117,8 +117,8 @@ action_schema:
             description: "Exact code snippet to fix the violation"
     reproducibility_score:
       type: "number"
-      minimum: 0.0
-      maximum: 1.0
+      minimum: 0.01
+      maximum: 0.99
       description: "Agent self-assessed reproducibility score"
     explanation:
       type: "string"
